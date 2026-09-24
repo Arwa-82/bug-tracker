@@ -1,0 +1,35 @@
+@import "tailwindcss";
+@plugin "daisyui";
+@plugin "daisyui/theme" {
+  name: "bugboard";
+  default: true;
+  prefersdark: false;
+  color-scheme: light;
+
+  --color-primary: #0f6e56;
+  --color-primary-content: #ffffff;
+
+  --color-secondary: #1d9e75;
+  --color-secondary-content: #04342c;
+
+  --color-error: #d85a30;
+  --color-error-content: #4a1b0c;
+
+  --color-warning: #f0997b;
+  --color-warning-content: #4a1b0c;
+
+  --color-success: #1d9e75;
+  --color-success-content: #04342c;
+
+  --color-info: #378add;
+  --color-info-content: #042c53;
+
+  --color-base-100: #ffffff;
+  --color-base-200: #f1efe8;
+  --color-base-300: #04342c;
+  --color-base-content: #2c2c2a;
+
+  --radius-box: 12px;
+  --radius-field: 8px;
+  --radius-selector: 20px;
+}
