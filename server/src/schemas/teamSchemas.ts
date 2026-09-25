@@ -9,3 +9,14 @@ export const createTeamSchema = z.object({
     .max(6, "Key must be at most 6 characters")
     .regex(/^[A-Za-z]+$/, "Key must contain only letters"),
 });
+
+// Validates the request body when adding a member to a team
+export const addMemberSchema = z.object({
+  email: z.string().email("Invalid email"),
+  role: z.enum(["admin", "developer", "qa"]).optional(),
+});
+
+// Validates the request body when changing a member's role
+export const updateMemberRoleSchema = z.object({
+  role: z.enum(["admin", "developer", "qa"]),
+});
