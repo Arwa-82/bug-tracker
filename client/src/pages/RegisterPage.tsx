@@ -52,7 +52,7 @@ export default function RegisterPage() {
               <input
                 type="text"
                 className="input input-bordered w-full"
-                placeholder="Arwa"
+                placeholder="Full name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required

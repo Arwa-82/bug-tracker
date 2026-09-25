@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
+import { useEffect, useState } from "react";
 import Sidebar from "./components/layout/Sidebar";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import LoginPage from "./pages/LoginPage";
@@ -6,7 +7,7 @@ import RegisterPage from "./pages/RegisterPage";
 import TeamsListPage from "./pages/TeamsListPage";
 import TeamBoardPage from "./pages/TeamBoardPage";
 import BugDetailPage from "./pages/BugDetailPage";
-import { useEffect, useState } from "react";
+import TeamSettingsPage from "./pages/TeamSettingsPage";
 import { getMyTeams } from "./api/teams";
 import type { Team } from "./api/teams";
 
@@ -54,6 +55,16 @@ function App() {
           <ProtectedRoute>
             <AppLayout>
               <TeamBoardPage />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/teams/:teamId/settings"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <TeamSettingsPage />
             </AppLayout>
           </ProtectedRoute>
         }
