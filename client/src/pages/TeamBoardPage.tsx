@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
-import { getTeamBugs, createBug, updateBugStatus } from "../api/bugs";
-import type { Bug, BugStatus } from "../api/bugs";
+import { useParams, useNavigate } from "react-router-dom";
+import {
+  getTeamBugs,
+  createBug,
+  updateBugStatus,
+  deleteBug,
+} from "../api/bugs";
+import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
 
-// The columns shown on the board, in display order.
-// Keeping "closed" out for now to match the earlier mockup —
-// closed bugs matter less day-to-day.
 const COLUMNS: { status: BugStatus; label: string }[] = [
   { status: "open", label: "Open" },
   { status: "in_progress", label: "In Progress" },
@@ -13,8 +15,6 @@ const COLUMNS: { status: BugStatus; label: string }[] = [
   { status: "verified", label: "Verified" },
 ];
 
-// Maps each status to a valid "next" status, for the simple
-// dropdown-based status changer (mirrors the backend's statusWorkflow.ts)
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   open: ["in_progress"],
   in_progress: ["fixed", "open"],
@@ -24,7 +24,6 @@ const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   reopened: ["in_progress"],
 };
 
-// Tailwind/DaisyUI classes per severity, so the badge color matches meaning
 const severityBadge: Record<string, string> = {
   critical: "badge-error",
   high: "badge-warning",
@@ -33,22 +32,26 @@ const severityBadge: Record<string, string> = {
 };
 
 export default function TeamBoardPage() {
-  // teamId comes from the URL, e.g. /teams/:teamId/board
   const { teamId } = useParams<{ teamId: string }>();
+  // useNavigate instead of <Link>, since the whole card is now clickable
+  // and we need to trigger navigation from a regular onClick handler
+  // on the outer div (a <Link> wrapping interactive children like
+  // <select> and <button> causes nested-interactive-element issues).
+  const navigate = useNavigate();
 
   const [bugs, setBugs] = useState<Bug[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Page-level error (e.g. "not a member of this team") — separate
-  // from the bug-creation form's own error message below
   const [pageError, setPageError] = useState<string | null>(null);
 
-  // New-bug form state
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
+  const [severity, setSeverity] = useState<BugSeverity>("medium");
+  const [priority, setPriority] = useState<BugPriority>("medium");
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Re-fetches all bugs for this team — called on mount and after any change
+  const [bugToDelete, setBugToDelete] = useState<Bug | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   async function loadBugs() {
     if (!teamId) return;
     setLoading(true);
@@ -57,7 +60,6 @@ export default function TeamBoardPage() {
       const res = await getTeamBugs(teamId);
       setBugs(res.bugs);
     } catch (err) {
-      // e.g. 403 "You are not a member of this team" from the backend
       setPageError(err instanceof Error ? err.message : "Failed to load bugs");
     } finally {
       setLoading(false);
@@ -74,10 +76,12 @@ export default function TeamBoardPage() {
     setFormError(null);
 
     try {
-      await createBug(teamId, { title });
+      await createBug(teamId, { title, severity, priority });
       setTitle("");
+      setSeverity("medium");
+      setPriority("medium");
       setShowForm(false);
-      await loadBugs(); // refresh so the new bug appears in the Open column
+      await loadBugs();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create bug");
     }
@@ -86,11 +90,23 @@ export default function TeamBoardPage() {
   async function handleStatusChange(bugId: string, newStatus: BugStatus) {
     try {
       await updateBugStatus(bugId, newStatus);
-      await loadBugs(); // refresh so the card moves to its new column
+      await loadBugs();
     } catch (err) {
-      // If the backend rejects the transition, show it as a simple alert for now.
-      // We'll replace this with a proper toast component later.
       alert(err instanceof Error ? err.message : "Status change failed");
+    }
+  }
+
+  async function confirmDelete() {
+    if (!bugToDelete) return;
+    setDeleting(true);
+    try {
+      await deleteBug(bugToDelete.id);
+      setBugToDelete(null);
+      await loadBugs();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to delete bug");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -102,8 +118,6 @@ export default function TeamBoardPage() {
     );
   }
 
-  // Shown when the user can't access this team's bugs at all
-  // (e.g. not a member) — stops the page from rendering blank
   if (pageError) {
     return <div className="p-6 text-error">{pageError}</div>;
   }
@@ -123,24 +137,58 @@ export default function TeamBoardPage() {
       {showForm && (
         <form
           onSubmit={handleCreateBug}
-          className="card mb-6 flex-row gap-3 bg-base-100 p-4 shadow"
+          className="card mb-6 flex-col gap-3 bg-base-100 p-4 shadow"
         >
           <input
             type="text"
             placeholder="Bug title"
-            className="input input-bordered flex-1"
+            className="input input-bordered w-full"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             required
           />
-          <button type="submit" className="btn btn-primary">
+
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-base-content/60">
+                Severity
+              </label>
+              <select
+                className="select select-bordered w-full"
+                value={severity}
+                onChange={(e) => setSeverity(e.target.value as BugSeverity)}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+            </div>
+
+            <div className="flex-1">
+              <label className="mb-1 block text-xs text-base-content/60">
+                Priority
+              </label>
+              <select
+                className="select select-bordered w-full"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as BugPriority)}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+          </div>
+
+          <button type="submit" className="btn btn-primary self-start">
             Create
           </button>
+
           {formError && <p className="text-sm text-error">{formError}</p>}
         </form>
       )}
 
-      {/* One column per status, each showing only the bugs currently in it */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {COLUMNS.map((col) => {
           const bugsInColumn = bugs.filter((b) => b.status === col.status);
@@ -153,19 +201,30 @@ export default function TeamBoardPage() {
 
               <div className="flex flex-col gap-2">
                 {bugsInColumn.map((bug) => (
+                  // The whole card is now clickable — navigates to the
+                  // bug's detail page. cursor-pointer + hover shadow signal
+                  // that it's clickable. Interactive children (delete button,
+                  // status select) each call stopPropagation so clicking them
+                  // doesn't also trigger this outer navigation.
                   <div
                     key={bug.id}
-                    className="card bg-base-100 p-3 shadow border-l-4 border-primary"
+                    onClick={() => navigate(`/bugs/${bug.id}`)}
+                    className="card cursor-pointer bg-base-100 p-3 shadow border-l-4 border-primary transition hover:shadow-md"
                   >
-                    {/* Title links to the bug's detail page. Kept separate from
-                        the dropdown below so clicking "Move to..." doesn't
-                        also trigger navigation */}
-                    <Link
-                      to={`/bugs/${bug.id}`}
-                      className="text-sm font-medium hover:underline"
-                    >
-                      {bug.title}
-                    </Link>
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="text-sm font-medium">{bug.title}</p>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation(); // don't also navigate
+                          setBugToDelete(bug);
+                        }}
+                        className="text-base-content/40 hover:text-error"
+                        title="Delete bug"
+                      >
+                        ✕
+                      </button>
+                    </div>
 
                     <span
                       className={`badge badge-sm mt-1 w-fit ${severityBadge[bug.severity]}`}
@@ -173,13 +232,14 @@ export default function TeamBoardPage() {
                       {bug.severity}
                     </span>
 
-                    {/* Fallback status control — no drag-and-drop yet */}
                     <select
                       className="select select-bordered select-xs mt-2"
                       value=""
-                      onChange={(e) =>
-                        handleStatusChange(bug.id, e.target.value as BugStatus)
-                      }
+                      onClick={(e) => e.stopPropagation()} // don't navigate when opening the dropdown
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        handleStatusChange(bug.id, e.target.value as BugStatus);
+                      }}
                     >
                       <option value="" disabled>
                         Move to...
@@ -197,6 +257,41 @@ export default function TeamBoardPage() {
           );
         })}
       </div>
+
+      {bugToDelete && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="text-lg font-semibold">Delete this bug?</h3>
+            <p className="py-3 text-sm text-base-content/70">
+              <span className="font-medium text-base-content">
+                "{bugToDelete.title}"
+              </span>{" "}
+              will be permanently removed, along with its comments and
+              attachments. This action cannot be undone.
+            </p>
+            <div className="modal-action">
+              <button
+                className="btn btn-ghost"
+                onClick={() => setBugToDelete(null)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn btn-error"
+                onClick={confirmDelete}
+                disabled={deleting}
+              >
+                {deleting ? "Deleting..." : "Delete bug"}
+              </button>
+            </div>
+          </div>
+          <div
+            className="modal-backdrop"
+            onClick={() => !deleting && setBugToDelete(null)}
+          />
+        </div>
+      )}
     </div>
   );
 }

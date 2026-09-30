@@ -65,6 +65,14 @@ export function updateBugStatus(bugId: string, status: BugStatus) {
   });
 }
 
+// Permanently deletes a bug. Only the reporter or a team admin can do this —
+// the backend enforces that; this call will throw if the user isn't allowed.
+export function deleteBug(bugId: string) {
+  return apiFetch<{ message: string }>(`/bugs/${bugId}`, {
+    method: "DELETE",
+  });
+}
+
 // Uploads a file (image or video) to a bug.
 // Note: this does NOT use apiFetch, because file uploads need
 // FormData instead of JSON, and the browser sets its own
@@ -75,13 +83,12 @@ export async function uploadBugAttachment(bugId: string, file: File) {
   const API_URL = import.meta.env.VITE_API_URL;
 
   const formData = new FormData();
-  formData.append("file", file); // "file" must match multer's upload.single("file") on the backend
+  formData.append("file", file);
 
   const res = await fetch(`${API_URL}/bugs/${bugId}/attachments`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
-      // No Content-Type here on purpose — see note above
     },
     body: formData,
   });
@@ -93,4 +100,12 @@ export async function uploadBugAttachment(bugId: string, file: File) {
   }
 
   return data as { bug: Bug };
+}
+// Deletes one attachment from a bug, identified by its array index
+// (attachments don't have their own database id — see backend note).
+export function deleteBugAttachment(bugId: string, attachmentIndex: number) {
+  return apiFetch<{ bug: Bug }>(
+    `/bugs/${bugId}/attachments/${attachmentIndex}`,
+    { method: "DELETE" }
+  );
 }

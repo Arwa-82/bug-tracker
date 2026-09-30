@@ -8,6 +8,7 @@ import TeamsListPage from "./pages/TeamsListPage";
 import TeamBoardPage from "./pages/TeamBoardPage";
 import BugDetailPage from "./pages/BugDetailPage";
 import TeamSettingsPage from "./pages/TeamSettingsPage";
+import TeamDashboardPage from "./pages/TeamDashboardPage";
 import { getMyTeams } from "./api/teams";
 import type { Team } from "./api/teams";
 
@@ -31,14 +32,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 function App() {
   return (
     <Routes>
-      {/* Redirect the bare root URL straight into the app */}
       <Route path="/" element={<Navigate to="/teams" replace />} />
 
-      {/* Public routes — no ProtectedRoute wrapper, no sidebar */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
 
-      {/* Protected routes — require a valid session, wrapped in the sidebar layout */}
       <Route
         path="/teams"
         element={
@@ -55,6 +53,16 @@ function App() {
           <ProtectedRoute>
             <AppLayout>
               <TeamBoardPage />
+            </AppLayout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/teams/:teamId/dashboard"
+        element={
+          <ProtectedRoute>
+            <AppLayout>
+              <TeamDashboardPage />
             </AppLayout>
           </ProtectedRoute>
         }
