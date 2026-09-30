@@ -1,47 +1,67 @@
 import { Request, Response } from "express";
-import { Types } from "mongoose";
-import { Comment } from "../models";
-
-const toObjectId = (value: string | string[] | undefined, fieldName: string) => {
-  const raw = Array.isArray(value) ? value[0] : value;
-
-  if (!raw) {
-    throw new Error(`Missing ${fieldName}`);
-  }
-
-  return new Types.ObjectId(raw);
-};
+import { Comment, Bug, Membership } from "../models";
+import { asyncHandler } from "../middleware/errorHandler";
 
 // GET /bugs/:id/comments — list all comments for one bug, oldest first
-// (oldest first so a comment thread reads top-to-bottom like a conversation)
-export async function getBugComments(req: Request, res: Response) {
-  const bugId = toObjectId(req.params.id, "bug id");
+export const getBugComments = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
 
-  const comments = await Comment.find({ bug: bugId })
-    .populate("author", "name email") // pull in the commenter's name/email, not their password
+  const comments = await Comment.find({ bug: id })
+    .populate("author", "name email")
     .sort({ createdAt: 1 });
 
   res.json({ comments });
-}
+});
 
 // POST /bugs/:id/comments — add a new comment to a bug
-export async function addBugComment(req: Request, res: Response) {
-  const bugId = toObjectId(req.params.id, "bug id");
+export const addBugComment = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
   const userId = (req as any).user._id;
   const { text } = req.body;
 
   const comment = await Comment.create({
-    bug: bugId,
+    bug: id,
     author: userId,
     text,
   });
 
-  // Populate the author field before sending back, so the frontend
-  // can immediately show the commenter's name without a second fetch
-  const populatedComment = await Comment.findById(comment._id).populate(
-    "author",
-    "name email"
-  );
+  await comment.populate("author", "name email");
 
-  res.status(201).json({ comment: populatedComment });
-}
+  res.status(201).json({ comment });
+});
+
+// DELETE /comments/:commentId — deletes a comment.
+// Only the comment's author or a team admin (of the bug's team) can delete it.
+export const deleteComment = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user._id;
+  const { commentId } = req.params;
+
+  const comment = await Comment.findById(commentId);
+  if (!comment) {
+    return res.status(404).json({ message: "Comment not found" });
+  }
+
+  // Need the bug to find its team, to check if the user is an admin there
+  const bug = await Bug.findById(comment.bug);
+  if (!bug) {
+    return res.status(404).json({ message: "Associated bug not found" });
+  }
+
+  const membership = await Membership.findOne({ team: bug.team, user: userId });
+  if (!membership) {
+    return res.status(403).json({ message: "You are not a member of this bug's team" });
+  }
+
+  const isAuthor = comment.author.toString() === userId.toString();
+  const isAdmin = membership.role === "admin";
+
+  if (!isAuthor && !isAdmin) {
+    return res.status(403).json({
+      message: "Only the comment's author or a team admin can delete it",
+    });
+  }
+
+  await Comment.deleteOne({ _id: commentId });
+
+  res.json({ message: "Comment deleted" });
+});

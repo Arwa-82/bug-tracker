@@ -1,6 +1,16 @@
 import { Router } from "express";
-import { getBug, updateBugStatus, addBugAttachment } from "../controllers/bugs";
-import { getBugComments, addBugComment } from "../controllers/comments";
+import {
+  getBug,
+  updateBugStatus,
+  deleteBug,
+  addBugAttachment,
+  deleteBugAttachment,
+} from "../controllers/bugs";
+import {
+  getBugComments,
+  addBugComment,
+  deleteComment,
+} from "../controllers/comments";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
 import { updateStatusSchema } from "../schemas/bugSchemas";
@@ -19,6 +29,7 @@ router.patch(
   validate(updateStatusSchema),
   updateBugStatus
 );
+router.delete("/:id", requireAuth, deleteBug);
 
 // Comments on a bug
 router.get("/:id/comments", requireAuth, getBugComments);
@@ -28,13 +39,17 @@ router.post(
   validate(createCommentSchema),
   addBugComment
 );
+// Note: comments are identified by their own id, not scoped under a bug id
+// in the URL, since Comment documents have a real _id (unlike attachments)
+router.delete("/comments/:commentId", requireAuth, deleteComment);
 
-// File attachments on a bug — "file" must match the field name the frontend sends
+// File attachments on a bug
 router.post(
   "/:id/attachments",
   requireAuth,
   upload.single("file"),
   addBugAttachment
 );
+router.delete("/:id/attachments/:attachmentId", requireAuth, deleteBugAttachment);
 
 export default router;

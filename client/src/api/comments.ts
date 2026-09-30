@@ -22,4 +22,9 @@ export function addBugComment(bugId: string, text: string) {
     method: "POST",
     body: JSON.stringify({ text }),
   });
+}// Deletes a comment by its own id
+export function deleteComment(commentId: string) {
+  return apiFetch<{ message: string }>(`/bugs/comments/${commentId}`, {
+    method: "DELETE",
+  });
 }

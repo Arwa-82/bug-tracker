@@ -1,10 +1,9 @@
 import { Schema, model, Document, Types } from "mongoose";
 
-// A single comment on a bug — simple text + who wrote it + when
 export interface IComment extends Document {
   _id: Types.ObjectId;
-  bug: Types.ObjectId; // which bug this comment belongs to
-  author: Types.ObjectId; // which user wrote it
+  bug: Types.ObjectId;
+  author: Types.ObjectId;
   text: string;
 }
 
@@ -14,10 +13,23 @@ const commentSchema = new Schema<IComment>(
     author: { type: Schema.Types.ObjectId, ref: "User", required: true },
     text: { type: String, required: true, trim: true },
   },
-  { timestamps: true } // createdAt is what we'll sort comments by
+  {
+    timestamps: true,
+    // Same transform pattern as the Bug model — converts _id into a
+    // plain "id" string and removes _id/__v, so the frontend can
+    // consistently use comment.id instead of comment._id.
+    toJSON: {
+      virtuals: true,
+      transform: (_doc, ret) => {
+        ret.id = ret._id.toString();
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
+  }
 );
 
-// Speeds up "get all comments for this bug" — the main query we'll run
 commentSchema.index({ bug: 1 });
 
 export const Comment = model<IComment>("Comment", commentSchema);
