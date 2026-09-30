@@ -1,6 +1,6 @@
 
 import { Request, Response, NextFunction } from "express";
-import jwt from "jsonwebtoken";
+import jwt, { JwtPayload } from "jsonwebtoken";
 import { User } from "../models";
 
 export async function requireAuth(
@@ -14,12 +14,22 @@ export async function requireAuth(
   }
 
   const token = header.split(" ")[1];
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("JWT_SECRET is not defined in .env");
+  if (!token) {
+    return res.status(401).json({ message: "No token provided" });
+  }
+
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) throw new Error("JWT_SECRET is not defined in .env");
 
   try {
-    const decoded = jwt.verify(token, secret) as { userId: string };
-    const user = await User.findById(decoded.userId);
+    const decoded = jwt.verify(token, jwtSecret);
+    const payload = decoded as JwtPayload & { userId?: string };
+
+    if (typeof decoded === "string" || !payload.userId) {
+      return res.status(401).json({ message: "Invalid or expired token" });
+    }
+
+    const user = await User.findById(payload.userId);
     if (!user) {
       return res.status(401).json({ message: "User no longer exists" });
     }
