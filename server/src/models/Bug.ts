@@ -85,10 +85,11 @@ const bugSchema = new Schema<IBug>(
     toJSON: {
       virtuals: true,
       transform: (_doc, ret) => {
-        ret.id = ret._id.toString();
-        delete ret._id;
-        delete ret.__v;
-        return ret;
+        const result = ret as any;
+        result.id = result._id.toString();
+        delete result._id;
+        delete result.__v;
+        return result;
       },
     },
   }

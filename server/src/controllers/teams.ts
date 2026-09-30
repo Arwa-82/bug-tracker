@@ -45,14 +45,13 @@ export const createTeam = asyncHandler(async (req: Request, res: Response) => {
   });
 });
 
-// GET /teams/:teamId/members — list everyone on a team, with their role.
-// Used by the Team Settings page to show the member list.
+// GET /teams/:teamId/members — list everyone on a team, with their role
 export const getTeamMembers = asyncHandler(async (req: Request, res: Response) => {
   const { teamId } = req.params;
 
   const memberships = await Membership.find({ team: teamId }).populate(
     "user",
-    "name email" // only pull in safe fields, never the password hash
+    "name email"
   );
 
   const members = memberships.map((m: any) => ({
@@ -67,9 +66,7 @@ export const getTeamMembers = asyncHandler(async (req: Request, res: Response) =
 });
 
 // POST /teams/:teamId/members — adds an existing user to a team by email.
-// TODO: right now ANY logged-in user can add members to ANY team —
-// this needs a role check (only admins of this team should be able to do this)
-// once we build role-based permission middleware in a later step.
+// Restricted to admins via requireRole("admin") in the route definition.
 export const addMember = asyncHandler(async (req: Request, res: Response) => {
   const { teamId } = req.params;
   const { email, role } = req.body;
@@ -96,7 +93,7 @@ export const addMember = asyncHandler(async (req: Request, res: Response) => {
 });
 
 // PATCH /teams/:teamId/members/:userId — change a member's role.
-// TODO: same permission gap as addMember — should be admin-only eventually.
+// Restricted to admins via requireRole("admin") in the route definition.
 export const updateMemberRole = asyncHandler(async (req: Request, res: Response) => {
   const { teamId, userId } = req.params;
   const { role } = req.body;
@@ -106,6 +103,21 @@ export const updateMemberRole = asyncHandler(async (req: Request, res: Response)
     return res.status(404).json({ message: "Membership not found" });
   }
 
+  // Prevent an admin from demoting themselves if they're the team's
+  // last remaining admin — otherwise the team could end up with no
+  // admin at all, and no one left who can manage it.
+  if (membership.role === "admin" && role !== "admin") {
+    const adminCount = await Membership.countDocuments({
+      team: teamId,
+      role: "admin",
+    });
+    if (adminCount <= 1) {
+      return res.status(400).json({
+        message: "Cannot change role: this is the team's last remaining admin",
+      });
+    }
+  }
+
   membership.role = role;
   await membership.save();
 
@@ -113,19 +125,29 @@ export const updateMemberRole = asyncHandler(async (req: Request, res: Response)
 });
 
 // DELETE /teams/:teamId/members/:userId — remove a member from a team.
-// TODO: same permission gap — should be admin-only, and probably should
-// prevent removing the last remaining admin so a team is never orphaned.
+// Restricted to admins via requireRole("admin") in the route definition.
 export const removeMember = asyncHandler(async (req: Request, res: Response) => {
   const { teamId, userId } = req.params;
 
-  const membership = await Membership.findOneAndDelete({
-    team: teamId,
-    user: userId,
-  });
-
+  const membership = await Membership.findOne({ team: teamId, user: userId });
   if (!membership) {
     return res.status(404).json({ message: "Membership not found" });
   }
+
+  // Same protection as above — don't allow removing the last admin
+  if (membership.role === "admin") {
+    const adminCount = await Membership.countDocuments({
+      team: teamId,
+      role: "admin",
+    });
+    if (adminCount <= 1) {
+      return res.status(400).json({
+        message: "Cannot remove the team's last remaining admin",
+      });
+    }
+  }
+
+  await Membership.deleteOne({ _id: membership._id });
 
   res.json({ message: "Member removed" });
 });

@@ -8,6 +8,7 @@ import {
   removeMember,
 } from "../controllers/teams";
 import { requireAuth } from "../middleware/auth";
+import { requireTeamMember, requireRole } from "../middleware/requireTeamMember";
 import { validate } from "../middleware/validate";
 import {
   createTeamSchema,
@@ -21,20 +22,32 @@ const router = Router();
 router.get("/", requireAuth, getMyTeams);
 router.post("/", requireAuth, validate(createTeamSchema), createTeam);
 
-// Membership management
-router.get("/:teamId/members", requireAuth, getTeamMembers);
+// Anyone on the team can VIEW the member list
+router.get("/:teamId/members", requireAuth, requireTeamMember, getTeamMembers);
+
+// Only admins can add, change roles, or remove members
 router.post(
   "/:teamId/members",
   requireAuth,
+  requireTeamMember,
+  requireRole("admin"),
   validate(addMemberSchema),
   addMember
 );
 router.patch(
   "/:teamId/members/:userId",
   requireAuth,
+  requireTeamMember,
+  requireRole("admin"),
   validate(updateMemberRoleSchema),
   updateMemberRole
 );
-router.delete("/:teamId/members/:userId", requireAuth, removeMember);
+router.delete(
+  "/:teamId/members/:userId",
+  requireAuth,
+  requireTeamMember,
+  requireRole("admin"),
+  removeMember
+);
 
 export default router;
