@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getBug,
   updateBugStatus,
+  assignBug,
   deleteBug,
   addBugAttachment,
   deleteBugAttachment,
@@ -13,7 +14,7 @@ import {
 } from "../controllers/comments";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { updateStatusSchema } from "../schemas/bugSchemas";
+import { updateStatusSchema, assignBugSchema } from "../schemas/bugSchemas";
 import { createCommentSchema } from "../schemas/commentSchemas";
 import { upload } from "../middleware/upload";
 
@@ -29,6 +30,12 @@ router.patch(
   validate(updateStatusSchema),
   updateBugStatus
 );
+router.patch(
+  "/:id/assign",
+  requireAuth,
+  validate(assignBugSchema),
+  assignBug
+);
 router.delete("/:id", requireAuth, deleteBug);
 
 // Comments on a bug
@@ -39,8 +46,6 @@ router.post(
   validate(createCommentSchema),
   addBugComment
 );
-// Note: comments are identified by their own id, not scoped under a bug id
-// in the URL, since Comment documents have a real _id (unlike attachments)
 router.delete("/comments/:commentId", requireAuth, deleteComment);
 
 // File attachments on a bug

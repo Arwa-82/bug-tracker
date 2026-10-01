@@ -109,3 +109,10 @@ export function deleteBugAttachment(bugId: string, attachmentIndex: number) {
     { method: "DELETE" }
   );
 }
+// Sets or clears a bug's assignee. Pass null to unassign.
+export function assignBug(bugId: string, assignee: string | null) {
+  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/assign`, {
+    method: "PATCH",
+    body: JSON.stringify({ assignee }),
+  });
+}

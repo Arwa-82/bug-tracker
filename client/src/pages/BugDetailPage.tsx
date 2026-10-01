@@ -5,6 +5,7 @@ import {
   updateBugStatus,
   uploadBugAttachment,
   deleteBugAttachment,
+  assignBug,
 } from "../api/bugs";
 import type { Bug, BugStatus } from "../api/bugs";
 import {
@@ -13,6 +14,8 @@ import {
   deleteComment,
 } from "../api/comments";
 import type { Comment } from "../api/comments";
+import { getTeamMembers } from "../api/teams";
+import type { Member } from "../api/teams";
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   open: ["in_progress"],
@@ -30,8 +33,6 @@ const severityBadge: Record<string, string> = {
   low: "badge-ghost",
 };
 
-// A single shape for "what's pending deletion", so one modal can handle
-// both attachments and comments instead of writing two nearly-identical ones.
 type PendingDelete =
   | { type: "attachment"; index: number; label: string }
   | { type: "comment"; id: string; label: string };
@@ -41,6 +42,9 @@ export default function BugDetailPage() {
 
   const [bug, setBug] = useState<Bug | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  // Team members list, used to populate the assignee dropdown and to
+  // look up a name to display for the currently assigned person.
+  const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -51,24 +55,30 @@ export default function BugDetailPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Whatever's currently targeted for deletion — drives the confirm modal.
-  // null means the modal is closed.
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(
     null
   );
   const [deleting, setDeleting] = useState(false);
+
+  // Tracks whether an assign request is in flight, so the dropdown
+  // can show a subtle disabled state while saving
+  const [assigning, setAssigning] = useState(false);
 
   async function loadData() {
     if (!bugId) return;
     setLoading(true);
     setPageError(null);
     try {
-      const [bugRes, commentsRes] = await Promise.all([
-        getBug(bugId),
-        getBugComments(bugId),
-      ]);
+      const bugRes = await getBug(bugId);
       setBug(bugRes.bug);
+
+      // Fetch comments and this bug's team members in parallel
+      const [commentsRes, membersRes] = await Promise.all([
+        getBugComments(bugId),
+        getTeamMembers(bugRes.bug.team),
+      ]);
       setComments(commentsRes.comments);
+      setMembers(membersRes.members);
     } catch (err) {
       setPageError(err instanceof Error ? err.message : "Failed to load bug");
     } finally {
@@ -87,6 +97,21 @@ export default function BugDetailPage() {
       setBug(res.bug);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Status change failed");
+    }
+  }
+
+  // Called when the assignee dropdown changes — empty string means
+  // "Unassigned", which we convert to null for the API
+  async function handleAssigneeChange(userId: string) {
+    if (!bug) return;
+    setAssigning(true);
+    try {
+      const res = await assignBug(bug.id, userId || null);
+      setBug(res.bug);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update assignee");
+    } finally {
+      setAssigning(false);
     }
   }
 
@@ -123,8 +148,6 @@ export default function BugDetailPage() {
     }
   }
 
-  // Runs when the user confirms deletion in the modal — branches based
-  // on whether it's an attachment or a comment being deleted.
   async function confirmDelete() {
     if (!pendingDelete || !bug) return;
     setDeleting(true);
@@ -137,7 +160,7 @@ export default function BugDetailPage() {
         await deleteComment(pendingDelete.id);
         setComments((prev) => prev.filter((c) => c.id !== pendingDelete.id));
       }
-      setPendingDelete(null); // closes the modal
+      setPendingDelete(null);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete");
     } finally {
@@ -181,20 +204,42 @@ export default function BugDetailPage() {
           Status: <span className="font-medium">{bug.status}</span>
         </p>
 
-        <select
-          className="select select-bordered select-sm w-fit"
-          value=""
-          onChange={(e) => handleStatusChange(e.target.value as BugStatus)}
-        >
-          <option value="" disabled>
-            Move to...
-          </option>
-          {nextStatusOptions[bug.status].map((s) => (
-            <option key={s} value={s}>
-              {s.replace("_", " ")}
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            className="select select-bordered select-sm w-fit"
+            value=""
+            onChange={(e) => handleStatusChange(e.target.value as BugStatus)}
+          >
+            <option value="" disabled>
+              Move to...
             </option>
-          ))}
-        </select>
+            {nextStatusOptions[bug.status].map((s) => (
+              <option key={s} value={s}>
+                {s.replace("_", " ")}
+              </option>
+            ))}
+          </select>
+
+          {/* Assignee dropdown — lists every team member plus an
+              "Unassigned" option. Value is the assignee's userId,
+              or empty string for unassigned. */}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-base-content/60">Assignee:</span>
+            <select
+              className="select select-bordered select-sm"
+              value={bug.assignee || ""}
+              onChange={(e) => handleAssigneeChange(e.target.value)}
+              disabled={assigning}
+            >
+              <option value="">Unassigned</option>
+              {members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         {bug.description && (
           <p className="mt-4 text-sm">{bug.description}</p>
@@ -329,8 +374,7 @@ export default function BugDetailPage() {
         </form>
       </div>
 
-      {/* Shared delete confirmation modal — handles both attachments
-          and comments, text adjusts based on pendingDelete.type */}
+      {/* Shared delete confirmation modal */}
       {pendingDelete && (
         <div className="modal modal-open">
           <div className="modal-box">
