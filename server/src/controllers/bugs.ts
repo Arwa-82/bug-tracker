@@ -81,6 +81,49 @@ export const updateBugStatus = asyncHandler(async (req: Request, res: Response) 
   res.json({ bug });
 });
 
+// PATCH /bugs/:id/assign — sets or clears a bug's assignee.
+// The assignee must be a member of the bug's team — you can't assign
+// a bug to someone who has no access to see or work on it.
+export const assignBug = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { assignee } = req.body; // a userId string, or null to unassign
+  const userId = (req as any).user._id;
+
+  const bug = await Bug.findById(id);
+  if (!bug) {
+    return res.status(404).json({ message: "Bug not found" });
+  }
+
+  // Confirm the requester is a member of this bug's team
+  const requesterMembership = await Membership.findOne({
+    team: bug.team,
+    user: userId,
+  });
+  if (!requesterMembership) {
+    return res.status(403).json({ message: "You are not a member of this bug's team" });
+  }
+
+  // If assigning to someone (not unassigning), confirm THAT person is
+  // also a member of this team — otherwise a bug could get assigned to
+  // someone with no way to see or act on it.
+  if (assignee) {
+    const assigneeMembership = await Membership.findOne({
+      team: bug.team,
+      user: assignee,
+    });
+    if (!assigneeMembership) {
+      return res.status(400).json({
+        message: "Assignee must be a member of this bug's team",
+      });
+    }
+  }
+
+  bug.assignee = assignee || null;
+  await bug.save();
+
+  res.json({ bug });
+});
+
 // DELETE /bugs/:id — permanently deletes a bug.
 export const deleteBug = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
@@ -136,8 +179,6 @@ export const addBugAttachment = asyncHandler(async (req: Request, res: Response)
 });
 
 // DELETE /bugs/:id/attachments/:attachmentId — removes one attachment
-// from a bug. Only the person who uploaded it, or a team admin, can
-// delete it — same pattern as bug deletion.
 export const deleteBugAttachment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
   const { id, attachmentId } = req.params;
@@ -152,10 +193,6 @@ export const deleteBugAttachment = asyncHandler(async (req: Request, res: Respon
     return res.status(403).json({ message: "You are not a member of this bug's team" });
   }
 
-  // Attachments don't have their own _id (schema uses { _id: false }),
-  // so we match by the "id" the frontend sends — here we use the
-  // attachment's array index passed as attachmentId instead, since
-  // that's what the frontend has readily available (see note below).
   const index = Number(attachmentId);
   const attachment = bug.attachments[index];
 

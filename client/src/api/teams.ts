@@ -73,3 +73,5 @@ export function removeMember(teamId: string, userId: string) {
     method: "DELETE",
   });
 }
+// Already defined getTeamMembers earlier for Team Settings — reusing it
+// here in BugDetailPage.tsx as well, no change needed if it's already there.
