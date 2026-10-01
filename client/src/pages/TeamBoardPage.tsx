@@ -1,6 +1,15 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
+  DndContext,
+  useDraggable,
+  useDroppable,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
   getTeamBugs,
   createBug,
   updateBugStatus,
@@ -33,8 +42,6 @@ const severityBadge: Record<string, string> = {
   low: "badge-ghost",
 };
 
-// Turns a full name into initials for the small avatar circle,
-// e.g. "Admin User" -> "AU". Falls back to "?" if name is empty.
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length === 0 || !parts[0]) return "?";
@@ -42,13 +49,131 @@ function getInitials(name: string): string {
   return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
+function DraggableBugCard({
+  bug,
+  assigneeName,
+  onOpen,
+  onDelete,
+  onStatusChange,
+}: {
+  bug: Bug;
+  assigneeName: string | null;
+  onOpen: () => void;
+  onDelete: () => void;
+  onStatusChange: (status: BugStatus) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } =
+    useDraggable({ id: bug.id });
+
+  const style = transform
+    ? {
+        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        zIndex: 50,
+      }
+    : undefined;
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      onClick={onOpen}
+      className={`card cursor-grab bg-base-100 p-3 shadow border-l-4 border-primary transition hover:shadow-md active:cursor-grabbing ${
+        isDragging ? "opacity-50" : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-medium">{bug.title}</p>
+
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+          className="text-base-content/40 hover:text-error"
+          title="Delete bug"
+        >
+          ✕
+        </button>
+      </div>
+
+      <div className="mt-1 flex items-center justify-between">
+        <span className={`badge badge-sm ${severityBadge[bug.severity]}`}>
+          {bug.severity}
+        </span>
+
+        {assigneeName ? (
+          <div
+            className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-content"
+            title={assigneeName}
+          >
+            {getInitials(assigneeName)}
+          </div>
+        ) : (
+          <div
+            className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-base-content/30 text-[10px] text-base-content/40"
+            title="Unassigned"
+          >
+            ?
+          </div>
+        )}
+      </div>
+
+      <select
+        className="select select-bordered select-xs mt-2"
+        value=""
+        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          e.stopPropagation();
+          onStatusChange(e.target.value as BugStatus);
+        }}
+      >
+        <option value="" disabled>
+          Move to...
+        </option>
+        {nextStatusOptions[bug.status].map((s) => (
+          <option key={s} value={s}>
+            {s.replace("_", " ")}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function DroppableColumn({
+  status,
+  label,
+  children,
+}: {
+  status: BugStatus;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`rounded-lg p-1 transition-colors ${
+        isOver ? "bg-primary/10" : ""
+      }`}
+    >
+      <p className="mb-2 px-2 text-xs font-medium text-base-content/60">
+        {label.toUpperCase()}
+      </p>
+      <div className="flex flex-col gap-2">{children}</div>
+    </div>
+  );
+}
+
 export default function TeamBoardPage() {
   const { teamId } = useParams<{ teamId: string }>();
   const navigate = useNavigate();
 
   const [bugs, setBugs] = useState<Bug[]>([]);
-  // Team members, used to resolve an assignee's userId into a
-  // displayable name/initials on each card.
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -62,13 +187,23 @@ export default function TeamBoardPage() {
   const [bugToDelete, setBugToDelete] = useState<Bug | null>(null);
   const [deleting, setDeleting] = useState(false);
 
+  // Holds a message for a failed status change (invalid transition,
+  // or a role-gated move like verifying as a non-QA user). Shown as a
+  // small dismissible banner instead of alert(), matching the rest
+  // of the app's styling. null means nothing to show.
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 8 },
+    })
+  );
+
   async function loadBoard() {
     if (!teamId) return;
     setLoading(true);
     setPageError(null);
     try {
-      // Fetch bugs and members in parallel — members rarely change,
-      // but fetching fresh each load keeps this simple for now.
       const [bugsRes, membersRes] = await Promise.all([
         getTeamBugs(teamId),
         getTeamMembers(teamId),
@@ -85,6 +220,14 @@ export default function TeamBoardPage() {
   useEffect(() => {
     loadBoard();
   }, [teamId]);
+
+  // Auto-dismiss the status error banner after a few seconds, so it
+  // doesn't linger forever and require a manual close
+  useEffect(() => {
+    if (!statusError) return;
+    const timer = setTimeout(() => setStatusError(null), 5000);
+    return () => clearTimeout(timer);
+  }, [statusError]);
 
   async function handleCreateBug(e: React.FormEvent) {
     e.preventDefault();
@@ -103,13 +246,42 @@ export default function TeamBoardPage() {
     }
   }
 
-  async function handleStatusChange(bugId: string, newStatus: BugStatus) {
+  async function changeBugStatus(bugId: string, newStatus: BugStatus) {
+    const previousBugs = bugs;
+
+    setBugs((prev) =>
+      prev.map((b) => (b.id === bugId ? { ...b, status: newStatus } : b))
+    );
+
     try {
       await updateBugStatus(bugId, newStatus);
-      await loadBoard();
+      setStatusError(null); // clear any previous error on success
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Status change failed");
+      setBugs(previousBugs);
+      setStatusError(
+        err instanceof Error ? err.message : "Status change failed"
+      );
     }
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over) return;
+
+    const bugId = active.id as string;
+    const newStatus = over.id as BugStatus;
+
+    const bug = bugs.find((b) => b.id === bugId);
+    if (!bug || bug.status === newStatus) return;
+
+    if (!nextStatusOptions[bug.status].includes(newStatus)) {
+      setStatusError(
+        `Cannot move a bug from "${bug.status.replace("_", " ")}" to "${newStatus.replace("_", " ")}"`
+      );
+      return;
+    }
+
+    changeBugStatus(bugId, newStatus);
   }
 
   async function confirmDelete() {
@@ -126,7 +298,6 @@ export default function TeamBoardPage() {
     }
   }
 
-  // Looks up a member's name by userId — used to show assignee initials
   function getAssigneeName(userId: string | null): string | null {
     if (!userId) return null;
     const member = members.find((m) => m.userId === userId);
@@ -156,6 +327,20 @@ export default function TeamBoardPage() {
           {showForm ? "Cancel" : "New bug"}
         </button>
       </div>
+
+      {/* Status-change error banner — replaces alert(), styled like a
+          DaisyUI toast/alert, dismissible, and auto-clears after 5s */}
+      {statusError && (
+        <div className="alert alert-error mb-4 py-2 text-sm shadow">
+          <span>{statusError}</span>
+          <button
+            onClick={() => setStatusError(null)}
+            className="btn btn-ghost btn-xs"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {showForm && (
         <form
@@ -212,92 +397,34 @@ export default function TeamBoardPage() {
         </form>
       )}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {COLUMNS.map((col) => {
-          const bugsInColumn = bugs.filter((b) => b.status === col.status);
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {COLUMNS.map((col) => {
+            const bugsInColumn = bugs.filter((b) => b.status === col.status);
 
-          return (
-            <div key={col.status}>
-              <p className="mb-2 text-xs font-medium text-base-content/60">
-                {col.label.toUpperCase()} &nbsp;{bugsInColumn.length}
-              </p>
-
-              <div className="flex flex-col gap-2">
-                {bugsInColumn.map((bug) => {
-                  const assigneeName = getAssigneeName(bug.assignee);
-
-                  return (
-                    <div
-                      key={bug.id}
-                      onClick={() => navigate(`/bugs/${bug.id}`)}
-                      className="card cursor-pointer bg-base-100 p-3 shadow border-l-4 border-primary transition hover:shadow-md"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-sm font-medium">{bug.title}</p>
-
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setBugToDelete(bug);
-                          }}
-                          className="text-base-content/40 hover:text-error"
-                          title="Delete bug"
-                        >
-                          ✕
-                        </button>
-                      </div>
-
-                      {/* Severity badge + assignee avatar on the same row */}
-                      <div className="mt-1 flex items-center justify-between">
-                        <span
-                          className={`badge badge-sm ${severityBadge[bug.severity]}`}
-                        >
-                          {bug.severity}
-                        </span>
-
-                        {assigneeName ? (
-                          <div
-                            className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-content"
-                            title={assigneeName}
-                          >
-                            {getInitials(assigneeName)}
-                          </div>
-                        ) : (
-                          <div
-                            className="flex h-5 w-5 items-center justify-center rounded-full border border-dashed border-base-content/30 text-[10px] text-base-content/40"
-                            title="Unassigned"
-                          >
-                            ?
-                          </div>
-                        )}
-                      </div>
-
-                      <select
-                        className="select select-bordered select-xs mt-2"
-                        value=""
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          e.stopPropagation();
-                          handleStatusChange(bug.id, e.target.value as BugStatus);
-                        }}
-                      >
-                        <option value="" disabled>
-                          Move to...
-                        </option>
-                        {nextStatusOptions[bug.status].map((s) => (
-                          <option key={s} value={s}>
-                            {s.replace("_", " ")}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            return (
+              <DroppableColumn
+                key={col.status}
+                status={col.status}
+                label={`${col.label} ${bugsInColumn.length}`}
+              >
+                {bugsInColumn.map((bug) => (
+                  <DraggableBugCard
+                    key={bug.id}
+                    bug={bug}
+                    assigneeName={getAssigneeName(bug.assignee)}
+                    onOpen={() => navigate(`/bugs/${bug.id}`)}
+                    onDelete={() => setBugToDelete(bug)}
+                    onStatusChange={(newStatus) =>
+                      changeBugStatus(bug.id, newStatus)
+                    }
+                  />
+                ))}
+              </DroppableColumn>
+            );
+          })}
+        </div>
+      </DndContext>
 
       {bugToDelete && (
         <div className="modal modal-open">
