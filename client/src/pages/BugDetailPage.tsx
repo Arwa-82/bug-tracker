@@ -18,6 +18,7 @@ import type { Comment } from "../api/comments";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
 import StepsInput from "../components/StepsInput";
+import LabelsInput from "../components/LabelsInput";
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   open: ["in_progress"],
@@ -43,8 +44,6 @@ function stripLeadingNumber(step: string): string {
   return step.replace(/^\s*\d+\s*[\.\-\)]\s*/, "");
 }
 
-// Shared purple left-accent label — used for both the read-only Details
-// view and the edit form, so styling stays identical in both states.
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="mb-1.5 border-l-[3px] border-[#7C3AED] pl-2.5 text-xs font-bold uppercase tracking-wide text-[#7C3AED]">
@@ -85,13 +84,12 @@ export default function BugDetailPage() {
 
   const [editingDetails, setEditingDetails] = useState(false);
   const [savingDetails, setSavingDetails] = useState(false);
-  // Steps are now an array (via StepsInput), matching the create form —
-  // replaces the old raw-textarea draftSteps string
   const [draftSteps, setDraftSteps] = useState<string[]>([""]);
   const [draftExpected, setDraftExpected] = useState("");
   const [draftActual, setDraftActual] = useState("");
   const [draftDevice, setDraftDevice] = useState("");
   const [draftBrowser, setDraftBrowser] = useState("");
+  const [draftLabels, setDraftLabels] = useState<string[]>([]);
 
   async function loadData() {
     if (!bugId) return;
@@ -200,13 +198,12 @@ export default function BugDetailPage() {
 
   function startEditingDetails() {
     if (!bug) return;
-    // Seed StepsInput with the bug's existing steps, or one empty row
-    // if there are none yet
     setDraftSteps(bug.stepsToReproduce.length ? bug.stepsToReproduce : [""]);
     setDraftExpected(bug.expectedResult);
     setDraftActual(bug.actualResult);
     setDraftDevice(bug.environment?.device || "");
     setDraftBrowser(bug.environment?.browser || "");
+    setDraftLabels(bug.labels);
     setEditingDetails(true);
   }
 
@@ -223,6 +220,7 @@ export default function BugDetailPage() {
         expectedResult: draftExpected,
         actualResult: draftActual,
         environment: { device: draftDevice, browser: draftBrowser },
+        labels: draftLabels,
       });
       setBug(res.bug);
       setEditingDetails(false);
@@ -334,6 +332,17 @@ export default function BugDetailPage() {
         )}
       </div>
 
+      {/* Label chips shown just below the title, when not editing */}
+      {!editingTitle && bug.labels.length > 0 && (
+        <div className="mb-4 -mt-2 flex flex-wrap gap-1.5 px-1">
+          {bug.labels.map((label) => (
+            <span key={label} className="badge badge-ghost badge-sm">
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="flex flex-col gap-4 lg:col-span-2">
           {bug.description && (
@@ -404,6 +413,11 @@ export default function BugDetailPage() {
                       onChange={(e) => setDraftBrowser(e.target.value)}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <SectionLabel>Labels</SectionLabel>
+                  <LabelsInput labels={draftLabels} onChange={setDraftLabels} />
                 </div>
 
                 <div className="flex gap-2">

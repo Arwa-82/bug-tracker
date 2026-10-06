@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   DndContext,
@@ -19,6 +19,7 @@ import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
 import StepsInput from "../components/StepsInput";
+import LabelsInput from "../components/LabelsInput";
 
 const COLUMNS: { status: BugStatus; label: string }[] = [
   { status: "open", label: "Open" },
@@ -44,8 +45,6 @@ const severityBadge: Record<string, string> = {
   low: "badge-ghost",
 };
 
-// Same purple left-accent label style used on the Bug Detail page —
-// kept consistent across the create form and the detail page.
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <h3 className="mb-1.5 border-l-[3px] border-[#7C3AED] pl-2.5 text-xs font-bold uppercase tracking-wide text-[#7C3AED]">
@@ -132,6 +131,20 @@ function DraggableBugCard({
         )}
       </div>
 
+      {/* Label chips, shown only if the bug has any */}
+      {bug.labels.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-1">
+          {bug.labels.map((label) => (
+            <span
+              key={label}
+              className="badge badge-ghost badge-xs"
+            >
+              {label}
+            </span>
+          ))}
+        </div>
+      )}
+
       <select
         className="select select-bordered select-xs mt-2"
         value=""
@@ -190,16 +203,22 @@ export default function TeamBoardPage() {
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
+  // Toolbar: search + filters, applied in-memory over the already-loaded bugs
+  const [searchText, setSearchText] = useState("");
+  const [severityFilter, setSeverityFilter] = useState<BugSeverity | "">("");
+  const [assigneeFilter, setAssigneeFilter] = useState<string>(""); // "", "me", or a userId
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [severity, setSeverity] = useState<BugSeverity>("medium");
   const [priority, setPriority] = useState<BugPriority>("medium");
-  // Steps are now an array managed by StepsInput, not a raw textarea string
   const [steps, setSteps] = useState<string[]>([""]);
   const [expectedResult, setExpectedResult] = useState("");
   const [actualResult, setActualResult] = useState("");
   const [device, setDevice] = useState("");
   const [browser, setBrowser] = useState("");
+  const [labels, setLabels] = useState<string[]>([]);
   const [showDetails, setShowDetails] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -236,6 +255,21 @@ export default function TeamBoardPage() {
     loadBoard();
   }, [teamId]);
 
+  // Figure out the current user's id (for the "My bugs" filter) by
+  // matching their token-derived identity against the member list —
+  // simplest approach without adding a separate "whoami" call here,
+  // since useAuth's user object doesn't currently expose this page.
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token) return;
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      setCurrentUserId(payload.userId || null);
+    } catch {
+      setCurrentUserId(null);
+    }
+  }, []);
+
   useEffect(() => {
     if (!statusError) return;
     const timer = setTimeout(() => setStatusError(null), 5000);
@@ -251,6 +285,7 @@ export default function TeamBoardPage() {
     setActualResult("");
     setDevice("");
     setBrowser("");
+    setLabels([]);
     setShowDetails(false);
   }
 
@@ -259,7 +294,6 @@ export default function TeamBoardPage() {
     if (!teamId) return;
     setFormError(null);
 
-    // Drop the trailing empty row before sending
     const stepsToReproduce = steps.map((s) => s.trim()).filter(Boolean);
 
     try {
@@ -271,6 +305,7 @@ export default function TeamBoardPage() {
         expectedResult: expectedResult || undefined,
         actualResult: actualResult || undefined,
         environment: device || browser ? { device, browser } : undefined,
+        labels: labels.length ? labels : undefined,
       });
       resetForm();
       setShowForm(false);
@@ -338,6 +373,33 @@ export default function TeamBoardPage() {
     return member ? member.name : null;
   }
 
+  // Applies search + filters over the already-loaded bugs array.
+  // Recomputed only when the inputs actually change, via useMemo.
+  const filteredBugs = useMemo(() => {
+    return bugs.filter((bug) => {
+      if (
+        searchText.trim() &&
+        !bug.title.toLowerCase().includes(searchText.trim().toLowerCase())
+      ) {
+        return false;
+      }
+      if (severityFilter && bug.severity !== severityFilter) {
+        return false;
+      }
+      if (assigneeFilter === "me" && bug.assignee !== currentUserId) {
+        return false;
+      }
+      if (
+        assigneeFilter &&
+        assigneeFilter !== "me" &&
+        bug.assignee !== assigneeFilter
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [bugs, searchText, severityFilter, assigneeFilter, currentUserId]);
+
   if (loading) {
     return (
       <div className="flex justify-center p-10">
@@ -360,6 +422,56 @@ export default function TeamBoardPage() {
         >
           {showForm ? "Cancel" : "New bug"}
         </button>
+      </div>
+
+      {/* Search + filter toolbar — purely client-side over the loaded bugs */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          placeholder="Search bugs..."
+          className="input input-bordered input-sm w-48"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+        />
+
+        <select
+          className="select select-bordered select-sm"
+          value={severityFilter}
+          onChange={(e) => setSeverityFilter(e.target.value as BugSeverity | "")}
+        >
+          <option value="">All severities</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+          <option value="critical">Critical</option>
+        </select>
+
+        <select
+          className="select select-bordered select-sm"
+          value={assigneeFilter}
+          onChange={(e) => setAssigneeFilter(e.target.value)}
+        >
+          <option value="">All assignees</option>
+          <option value="me">My bugs</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.name}
+            </option>
+          ))}
+        </select>
+
+        {(searchText || severityFilter || assigneeFilter) && (
+          <button
+            onClick={() => {
+              setSearchText("");
+              setSeverityFilter("");
+              setAssigneeFilter("");
+            }}
+            className="btn btn-ghost btn-sm"
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {statusError && (
@@ -419,6 +531,13 @@ export default function TeamBoardPage() {
                 <option value="high">High</option>
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs text-base-content/60">
+              Labels
+            </label>
+            <LabelsInput labels={labels} onChange={setLabels} />
           </div>
 
           <button
@@ -490,7 +609,9 @@ export default function TeamBoardPage() {
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {COLUMNS.map((col) => {
-            const bugsInColumn = bugs.filter((b) => b.status === col.status);
+            const bugsInColumn = filteredBugs.filter(
+              (b) => b.status === col.status
+            );
 
             return (
               <DroppableColumn

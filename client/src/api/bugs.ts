@@ -37,6 +37,7 @@ export interface Bug {
   team: string;
   reporter: string;
   assignee: string | null;
+  labels: string[];
   attachments: Attachment[];
 }
 
@@ -56,6 +57,7 @@ export function createBug(
     expectedResult?: string;
     actualResult?: string;
     environment?: Environment;
+    labels?: string[];
   }
 ) {
   return apiFetch<{ bug: Bug }>(`/teams/${teamId}/bugs`, {
@@ -82,6 +84,7 @@ export function updateBug(
     environment: Environment;
     severity: BugSeverity;
     priority: BugPriority;
+    labels: string[];
   }>
 ) {
   return apiFetch<{ bug: Bug }>(`/bugs/${bugId}`, {
