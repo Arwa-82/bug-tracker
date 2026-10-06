@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   getBug,
+  updateBug,
   updateBugStatus,
   uploadBugAttachment,
   deleteBugAttachment,
   assignBug,
 } from "../api/bugs";
-import type { Bug, BugStatus } from "../api/bugs";
+import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
 import {
   getBugComments,
   addBugComment,
@@ -16,6 +17,7 @@ import {
 import type { Comment } from "../api/comments";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
+import StepsInput from "../components/StepsInput";
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   open: ["in_progress"],
@@ -37,13 +39,25 @@ type PendingDelete =
   | { type: "attachment"; index: number; label: string }
   | { type: "comment"; id: string; label: string };
 
+function stripLeadingNumber(step: string): string {
+  return step.replace(/^\s*\d+\s*[\.\-\)]\s*/, "");
+}
+
+// Shared purple left-accent label — used for both the read-only Details
+// view and the edit form, so styling stays identical in both states.
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-1.5 border-l-[3px] border-[#7C3AED] pl-2.5 text-xs font-bold uppercase tracking-wide text-[#7C3AED]">
+      {children}
+    </h3>
+  );
+}
+
 export default function BugDetailPage() {
   const { bugId } = useParams<{ bugId: string }>();
 
   const [bug, setBug] = useState<Bug | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
-  // Team members list, used to populate the assignee dropdown and to
-  // look up a name to display for the currently assigned person.
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -60,9 +74,24 @@ export default function BugDetailPage() {
   );
   const [deleting, setDeleting] = useState(false);
 
-  // Tracks whether an assign request is in flight, so the dropdown
-  // can show a subtle disabled state while saving
   const [assigning, setAssigning] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
+  const [changingSeverity, setChangingSeverity] = useState(false);
+  const [changingPriority, setChangingPriority] = useState(false);
+
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [savingTitle, setSavingTitle] = useState(false);
+
+  const [editingDetails, setEditingDetails] = useState(false);
+  const [savingDetails, setSavingDetails] = useState(false);
+  // Steps are now an array (via StepsInput), matching the create form —
+  // replaces the old raw-textarea draftSteps string
+  const [draftSteps, setDraftSteps] = useState<string[]>([""]);
+  const [draftExpected, setDraftExpected] = useState("");
+  const [draftActual, setDraftActual] = useState("");
+  const [draftDevice, setDraftDevice] = useState("");
+  const [draftBrowser, setDraftBrowser] = useState("");
 
   async function loadData() {
     if (!bugId) return;
@@ -72,7 +101,6 @@ export default function BugDetailPage() {
       const bugRes = await getBug(bugId);
       setBug(bugRes.bug);
 
-      // Fetch comments and this bug's team members in parallel
       const [commentsRes, membersRes] = await Promise.all([
         getBugComments(bugId),
         getTeamMembers(bugRes.bug.team),
@@ -92,16 +120,17 @@ export default function BugDetailPage() {
 
   async function handleStatusChange(newStatus: BugStatus) {
     if (!bug) return;
+    setChangingStatus(true);
     try {
       const res = await updateBugStatus(bug.id, newStatus);
       setBug(res.bug);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Status change failed");
+    } finally {
+      setChangingStatus(false);
     }
   }
 
-  // Called when the assignee dropdown changes — empty string means
-  // "Unassigned", which we convert to null for the API
   async function handleAssigneeChange(userId: string) {
     if (!bug) return;
     setAssigning(true);
@@ -112,6 +141,95 @@ export default function BugDetailPage() {
       alert(err instanceof Error ? err.message : "Failed to update assignee");
     } finally {
       setAssigning(false);
+    }
+  }
+
+  async function handleSeverityChange(value: BugSeverity) {
+    if (!bug) return;
+    setChangingSeverity(true);
+    try {
+      const res = await updateBug(bug.id, { severity: value });
+      setBug(res.bug);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update severity");
+    } finally {
+      setChangingSeverity(false);
+    }
+  }
+
+  async function handlePriorityChange(value: BugPriority) {
+    if (!bug) return;
+    setChangingPriority(true);
+    try {
+      const res = await updateBug(bug.id, { priority: value });
+      setBug(res.bug);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update priority");
+    } finally {
+      setChangingPriority(false);
+    }
+  }
+
+  function startEditingTitle() {
+    if (!bug) return;
+    setTitleDraft(bug.title);
+    setEditingTitle(true);
+  }
+
+  async function saveTitle() {
+    if (!bug || !titleDraft.trim() || titleDraft === bug.title) {
+      setEditingTitle(false);
+      return;
+    }
+    setSavingTitle(true);
+    try {
+      const res = await updateBug(bug.id, { title: titleDraft.trim() });
+      setBug(res.bug);
+      setEditingTitle(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update title");
+    } finally {
+      setSavingTitle(false);
+    }
+  }
+
+  function handleTitleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") saveTitle();
+    if (e.key === "Escape") setEditingTitle(false);
+  }
+
+  function startEditingDetails() {
+    if (!bug) return;
+    // Seed StepsInput with the bug's existing steps, or one empty row
+    // if there are none yet
+    setDraftSteps(bug.stepsToReproduce.length ? bug.stepsToReproduce : [""]);
+    setDraftExpected(bug.expectedResult);
+    setDraftActual(bug.actualResult);
+    setDraftDevice(bug.environment?.device || "");
+    setDraftBrowser(bug.environment?.browser || "");
+    setEditingDetails(true);
+  }
+
+  async function saveDetails() {
+    if (!bug) return;
+    setSavingDetails(true);
+    try {
+      const stepsToReproduce = draftSteps
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const res = await updateBug(bug.id, {
+        stepsToReproduce,
+        expectedResult: draftExpected,
+        actualResult: draftActual,
+        environment: { device: draftDevice, browser: draftBrowser },
+      });
+      setBug(res.bug);
+      setEditingDetails(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to update details");
+    } finally {
+      setSavingDetails(false);
     }
   }
 
@@ -151,7 +269,6 @@ export default function BugDetailPage() {
   async function confirmDelete() {
     if (!pendingDelete || !bug) return;
     setDeleting(true);
-
     try {
       if (pendingDelete.type === "attachment") {
         const res = await deleteBugAttachment(bug.id, pendingDelete.index);
@@ -181,9 +298,12 @@ export default function BugDetailPage() {
   }
 
   const backendOrigin = import.meta.env.VITE_API_URL.replace(/\/api$/, "");
+  const hasEnvironment = bug.environment?.device || bug.environment?.browser;
+  const assigneeName =
+    members.find((m) => m.userId === bug.assignee)?.name || null;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-5xl">
       <Link
         to={`/teams/${bug.team}/board`}
         className="mb-4 inline-block text-sm text-primary hover:underline"
@@ -191,190 +311,403 @@ export default function BugDetailPage() {
         &larr; Back to board
       </Link>
 
-      {/* Bug header */}
-      <div className="card mb-4 bg-base-100 p-5 shadow">
-        <div className="mb-2 flex items-start justify-between gap-4">
-          <h1 className="text-xl font-semibold">{bug.title}</h1>
-          <span className={`badge ${severityBadge[bug.severity]}`}>
-            {bug.severity}
-          </span>
-        </div>
-
-        <p className="mb-3 text-sm text-base-content/70">
-          Status: <span className="font-medium">{bug.status}</span>
-        </p>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <select
-            className="select select-bordered select-sm w-fit"
-            value=""
-            onChange={(e) => handleStatusChange(e.target.value as BugStatus)}
-          >
-            <option value="" disabled>
-              Move to...
-            </option>
-            {nextStatusOptions[bug.status].map((s) => (
-              <option key={s} value={s}>
-                {s.replace("_", " ")}
-              </option>
-            ))}
-          </select>
-
-          {/* Assignee dropdown — lists every team member plus an
-              "Unassigned" option. Value is the assignee's userId,
-              or empty string for unassigned. */}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-base-content/60">Assignee:</span>
-            <select
-              className="select select-bordered select-sm"
-              value={bug.assignee || ""}
-              onChange={(e) => handleAssigneeChange(e.target.value)}
-              disabled={assigning}
-            >
-              <option value="">Unassigned</option>
-              {members.map((m) => (
-                <option key={m.userId} value={m.userId}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {bug.description && (
-          <p className="mt-4 text-sm">{bug.description}</p>
-        )}
-      </div>
-
-      {/* Attachments section */}
-      <div className="card mb-4 bg-base-100 p-5 shadow">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-medium">Attachments</h2>
-
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,video/*"
-            className="hidden"
-            onChange={handleFileSelected}
-          />
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            {uploading ? "Uploading..." : "Upload image/video"}
-          </button>
-        </div>
-
-        {uploadError && (
-          <p className="mb-2 text-sm text-error">{uploadError}</p>
-        )}
-
-        {bug.attachments.length === 0 ? (
-          <p className="text-sm text-base-content/60">No attachments yet.</p>
-        ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-            {bug.attachments.map((att, i) => (
-              <div key={i} className="relative">
-                <button
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setPendingDelete({
-                      type: "attachment",
-                      index: i,
-                      label: att.filename,
-                    });
-                  }}
-                  className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-xs text-white hover:bg-error"
-                  title="Delete attachment"
-                >
-                  ✕
-                </button>
-
-                <a
-                  href={`${backendOrigin}${att.url}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block overflow-hidden rounded-lg border border-base-300"
-                >
-                  {att.mimetype.startsWith("image/") ? (
-                    <img
-                      src={`${backendOrigin}${att.url}`}
-                      alt={att.filename}
-                      className="h-24 w-full object-cover"
-                    />
-                  ) : (
-                    <video
-                      src={`${backendOrigin}${att.url}`}
-                      className="h-24 w-full object-cover"
-                      muted
-                    />
-                  )}
-                  <p className="truncate p-1 text-xs">{att.filename}</p>
-                </a>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Comments section */}
-      <div className="card bg-base-100 p-5 shadow">
-        <h2 className="mb-3 font-medium">Comments</h2>
-
-        <div className="mb-4 flex flex-col gap-3">
-          {comments.length === 0 ? (
-            <p className="text-sm text-base-content/60">No comments yet.</p>
-          ) : (
-            comments.map((c) => (
-              <div
-                key={c.id}
-                className="flex items-start justify-between gap-2 rounded-lg bg-base-200 p-3"
-              >
-                <div>
-                  <p className="text-xs font-medium">{c.author.name}</p>
-                  <p className="text-sm">{c.text}</p>
-                </div>
-
-                <button
-                  onClick={() =>
-                    setPendingDelete({
-                      type: "comment",
-                      id: c.id,
-                      label: c.text,
-                    })
-                  }
-                  className="shrink-0 text-base-content/40 hover:text-error"
-                  title="Delete comment"
-                >
-                  ✕
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-
-        <form onSubmit={handleAddComment} className="flex gap-2">
+      <div className="mb-4">
+        {editingTitle ? (
           <input
             type="text"
-            className="input input-bordered flex-1"
-            placeholder="Add a comment..."
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
+            autoFocus
+            className="input input-bordered w-full text-xl font-semibold"
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            onBlur={saveTitle}
+            onKeyDown={handleTitleKeyDown}
+            disabled={savingTitle}
           />
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={postingComment || !commentText.trim()}
+        ) : (
+          <h1
+            onClick={startEditingTitle}
+            className="cursor-text rounded px-1 text-xl font-semibold hover:bg-base-200"
+            title="Click to edit"
           >
-            {postingComment ? "Posting..." : "Post"}
-          </button>
-        </form>
+            {bug.title}
+          </h1>
+        )}
       </div>
 
-      {/* Shared delete confirmation modal */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="flex flex-col gap-4 lg:col-span-2">
+          {bug.description && (
+            <div className="card bg-base-100 p-5 shadow">
+              <h2 className="mb-2 text-sm font-medium text-base-content/60">
+                Description
+              </h2>
+              <p className="text-sm">{bug.description}</p>
+            </div>
+          )}
+
+          <div className="card bg-base-100 p-5 shadow">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-medium">Details</h2>
+              {!editingDetails && (
+                <button
+                  onClick={startEditingDetails}
+                  className="btn btn-ghost btn-xs"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {editingDetails ? (
+              <div className="flex flex-col gap-4">
+                <div>
+                  <SectionLabel>Steps to reproduce</SectionLabel>
+                  <StepsInput steps={draftSteps} onChange={setDraftSteps} />
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <SectionLabel>Expected result</SectionLabel>
+                    <input
+                      type="text"
+                      className="input input-bordered w-full text-sm"
+                      value={draftExpected}
+                      onChange={(e) => setDraftExpected(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <SectionLabel>Actual result</SectionLabel>
+                    <input
+                      type="text"
+                      className="input input-bordered w-full text-sm"
+                      value={draftActual}
+                      onChange={(e) => setDraftActual(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <SectionLabel>Environment</SectionLabel>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <input
+                      type="text"
+                      className="input input-bordered w-full text-sm"
+                      placeholder="Device (e.g. iPhone 14)"
+                      value={draftDevice}
+                      onChange={(e) => setDraftDevice(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      className="input input-bordered w-full text-sm"
+                      placeholder="Browser (e.g. Safari 17)"
+                      value={draftBrowser}
+                      onChange={(e) => setDraftBrowser(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveDetails}
+                    className="btn btn-primary btn-sm"
+                    disabled={savingDetails}
+                  >
+                    {savingDetails ? "Saving..." : "Save"}
+                  </button>
+                  <button
+                    onClick={() => setEditingDetails(false)}
+                    className="btn btn-ghost btn-sm"
+                    disabled={savingDetails}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-4">
+                {bug.stepsToReproduce.length > 0 && (
+                  <div>
+                    <SectionLabel>Steps to reproduce</SectionLabel>
+                    <ol className="list-inside list-decimal space-y-1 pl-0.5 text-sm">
+                      {bug.stepsToReproduce.map((step, i) => (
+                        <li key={i}>{stripLeadingNumber(step)}</li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {(bug.expectedResult || bug.actualResult) && (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div>
+                      <SectionLabel>Expected result</SectionLabel>
+                      <p className="pl-0.5 text-sm">
+                        {bug.expectedResult || (
+                          <span className="text-base-content/40">—</span>
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <SectionLabel>Actual result</SectionLabel>
+                      <p className="pl-0.5 text-sm">
+                        {bug.actualResult || (
+                          <span className="text-base-content/40">—</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {hasEnvironment && (
+                  <div>
+                    <SectionLabel>Environment</SectionLabel>
+                    <div className="flex flex-wrap gap-x-6 gap-y-1 pl-0.5 text-sm">
+                      {bug.environment.device && (
+                        <span>
+                          <span className="text-base-content/50">Device:</span>{" "}
+                          {bug.environment.device}
+                        </span>
+                      )}
+                      {bug.environment.browser && (
+                        <span>
+                          <span className="text-base-content/50">Browser:</span>{" "}
+                          {bug.environment.browser}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {bug.stepsToReproduce.length === 0 &&
+                  !bug.expectedResult &&
+                  !bug.actualResult &&
+                  !hasEnvironment && (
+                    <p className="text-sm text-base-content/50">
+                      No additional details yet.
+                    </p>
+                  )}
+              </div>
+            )}
+          </div>
+
+          <div className="card bg-base-100 p-5 shadow">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-medium">Attachments</h2>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={handleFileSelected}
+              />
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                {uploading ? "Uploading..." : "Upload image/video"}
+              </button>
+            </div>
+
+            {uploadError && (
+              <p className="mb-2 text-sm text-error">{uploadError}</p>
+            )}
+
+            {bug.attachments.length === 0 ? (
+              <p className="text-sm text-base-content/60">No attachments yet.</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {bug.attachments.map((att, i) => (
+                  <div key={i} className="relative">
+                    <button
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setPendingDelete({
+                          type: "attachment",
+                          index: i,
+                          label: att.filename,
+                        });
+                      }}
+                      className="absolute right-1 top-1 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-black/60 text-xs text-white hover:bg-error"
+                      title="Delete attachment"
+                    >
+                      ✕
+                    </button>
+                    <a
+                      href={`${backendOrigin}${att.url}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block overflow-hidden rounded-lg border border-base-300"
+                    >
+                      {att.mimetype.startsWith("image/") ? (
+                        <img
+                          src={`${backendOrigin}${att.url}`}
+                          alt={att.filename}
+                          className="h-24 w-full object-cover"
+                        />
+                      ) : (
+                        <video
+                          src={`${backendOrigin}${att.url}`}
+                          className="h-24 w-full object-cover"
+                          muted
+                        />
+                      )}
+                      <p className="truncate p-1 text-xs">{att.filename}</p>
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="card bg-base-100 p-5 shadow">
+            <h2 className="mb-3 font-medium">Comments</h2>
+            <div className="mb-4 flex flex-col gap-3">
+              {comments.length === 0 ? (
+                <p className="text-sm text-base-content/60">No comments yet.</p>
+              ) : (
+                comments.map((c) => (
+                  <div
+                    key={c.id}
+                    className="flex items-start justify-between gap-2 rounded-lg bg-base-200 p-3"
+                  >
+                    <div>
+                      <p className="text-xs font-medium">{c.author.name}</p>
+                      <p className="text-sm">{c.text}</p>
+                    </div>
+                    <button
+                      onClick={() =>
+                        setPendingDelete({
+                          type: "comment",
+                          id: c.id,
+                          label: c.text,
+                        })
+                      }
+                      className="shrink-0 text-base-content/40 hover:text-error"
+                      title="Delete comment"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <form onSubmit={handleAddComment} className="flex gap-2">
+              <input
+                type="text"
+                className="input input-bordered flex-1"
+                placeholder="Add a comment..."
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+              />
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={postingComment || !commentText.trim()}
+              >
+                {postingComment ? "Posting..." : "Post"}
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <div className="lg:sticky lg:top-6 lg:self-start">
+          <div className="card flex flex-col gap-4 bg-base-100 p-5 shadow">
+            <div>
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                Status
+              </h3>
+              <p className="mb-2 text-sm font-medium">{bug.status}</p>
+              <select
+                className="select select-bordered select-sm w-full"
+                value=""
+                onChange={(e) => handleStatusChange(e.target.value as BugStatus)}
+                disabled={changingStatus}
+              >
+                <option value="" disabled>
+                  Move to...
+                </option>
+                {nextStatusOptions[bug.status].map((s) => (
+                  <option key={s} value={s}>
+                    {s.replace("_", " ")}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="border-t border-base-200 pt-4">
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                Assignee
+              </h3>
+              <select
+                className="select select-bordered select-sm w-full"
+                value={bug.assignee || ""}
+                onChange={(e) => handleAssigneeChange(e.target.value)}
+                disabled={assigning}
+              >
+                <option value="">Unassigned</option>
+                {members.map((m) => (
+                  <option key={m.userId} value={m.userId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="border-t border-base-200 pt-4">
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                Severity
+              </h3>
+              <select
+                className="select select-bordered select-sm w-full"
+                value={bug.severity}
+                onChange={(e) =>
+                  handleSeverityChange(e.target.value as BugSeverity)
+                }
+                disabled={changingSeverity}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="critical">Critical</option>
+              </select>
+              <span
+                className={`badge badge-sm mt-2 ${severityBadge[bug.severity]}`}
+              >
+                {bug.severity}
+              </span>
+            </div>
+
+            <div className="border-t border-base-200 pt-4">
+              <h3 className="mb-1.5 text-xs font-medium uppercase tracking-wide text-base-content/50">
+                Priority
+              </h3>
+              <select
+                className="select select-bordered select-sm w-full"
+                value={bug.priority}
+                onChange={(e) =>
+                  handlePriorityChange(e.target.value as BugPriority)
+                }
+                disabled={changingPriority}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </div>
+
+            {assigneeName && (
+              <div className="border-t border-base-200 pt-4 text-xs text-base-content/50">
+                Assigned to{" "}
+                <span className="font-medium text-base-content">
+                  {assigneeName}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
       {pendingDelete && (
         <div className="modal modal-open">
           <div className="modal-box">
@@ -393,10 +726,7 @@ export default function BugDetailPage() {
                   cannot be undone.
                 </>
               ) : (
-                <>
-                  This comment will be permanently removed. This action
-                  cannot be undone.
-                </>
+                <>This comment will be permanently removed. This action cannot be undone.</>
               )}
             </p>
             <div className="modal-action">

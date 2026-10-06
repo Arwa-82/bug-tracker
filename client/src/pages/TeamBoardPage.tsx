@@ -18,12 +18,14 @@ import {
 import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
+import StepsInput from "../components/StepsInput";
 
 const COLUMNS: { status: BugStatus; label: string }[] = [
   { status: "open", label: "Open" },
   { status: "in_progress", label: "In Progress" },
   { status: "fixed", label: "Fixed" },
   { status: "verified", label: "Verified" },
+  { status: "closed", label: "Closed" },
 ];
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
@@ -41,6 +43,16 @@ const severityBadge: Record<string, string> = {
   medium: "badge-warning badge-outline",
   low: "badge-ghost",
 };
+
+// Same purple left-accent label style used on the Bug Detail page —
+// kept consistent across the create form and the detail page.
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-1.5 border-l-[3px] border-[#7C3AED] pl-2.5 text-xs font-bold uppercase tracking-wide text-[#7C3AED]">
+      {children}
+    </h3>
+  );
+}
 
 function getInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
@@ -182,15 +194,18 @@ export default function TeamBoardPage() {
   const [title, setTitle] = useState("");
   const [severity, setSeverity] = useState<BugSeverity>("medium");
   const [priority, setPriority] = useState<BugPriority>("medium");
+  // Steps are now an array managed by StepsInput, not a raw textarea string
+  const [steps, setSteps] = useState<string[]>([""]);
+  const [expectedResult, setExpectedResult] = useState("");
+  const [actualResult, setActualResult] = useState("");
+  const [device, setDevice] = useState("");
+  const [browser, setBrowser] = useState("");
+  const [showDetails, setShowDetails] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const [bugToDelete, setBugToDelete] = useState<Bug | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Holds a message for a failed status change (invalid transition,
-  // or a role-gated move like verifying as a non-QA user). Shown as a
-  // small dismissible banner instead of alert(), matching the rest
-  // of the app's styling. null means nothing to show.
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const sensors = useSensors(
@@ -221,24 +236,43 @@ export default function TeamBoardPage() {
     loadBoard();
   }, [teamId]);
 
-  // Auto-dismiss the status error banner after a few seconds, so it
-  // doesn't linger forever and require a manual close
   useEffect(() => {
     if (!statusError) return;
     const timer = setTimeout(() => setStatusError(null), 5000);
     return () => clearTimeout(timer);
   }, [statusError]);
 
+  function resetForm() {
+    setTitle("");
+    setSeverity("medium");
+    setPriority("medium");
+    setSteps([""]);
+    setExpectedResult("");
+    setActualResult("");
+    setDevice("");
+    setBrowser("");
+    setShowDetails(false);
+  }
+
   async function handleCreateBug(e: React.FormEvent) {
     e.preventDefault();
     if (!teamId) return;
     setFormError(null);
 
+    // Drop the trailing empty row before sending
+    const stepsToReproduce = steps.map((s) => s.trim()).filter(Boolean);
+
     try {
-      await createBug(teamId, { title, severity, priority });
-      setTitle("");
-      setSeverity("medium");
-      setPriority("medium");
+      await createBug(teamId, {
+        title,
+        severity,
+        priority,
+        stepsToReproduce: stepsToReproduce.length ? stepsToReproduce : undefined,
+        expectedResult: expectedResult || undefined,
+        actualResult: actualResult || undefined,
+        environment: device || browser ? { device, browser } : undefined,
+      });
+      resetForm();
       setShowForm(false);
       await loadBoard();
     } catch (err) {
@@ -255,7 +289,7 @@ export default function TeamBoardPage() {
 
     try {
       await updateBugStatus(bugId, newStatus);
-      setStatusError(null); // clear any previous error on success
+      setStatusError(null);
     } catch (err) {
       setBugs(previousBugs);
       setStatusError(
@@ -328,8 +362,6 @@ export default function TeamBoardPage() {
         </button>
       </div>
 
-      {/* Status-change error banner — replaces alert(), styled like a
-          DaisyUI toast/alert, dismissible, and auto-clears after 5s */}
       {statusError && (
         <div className="alert alert-error mb-4 py-2 text-sm shadow">
           <span>{statusError}</span>
@@ -389,6 +421,64 @@ export default function TeamBoardPage() {
             </div>
           </div>
 
+          <button
+            type="button"
+            onClick={() => setShowDetails((prev) => !prev)}
+            className="self-start text-xs text-primary hover:underline"
+          >
+            {showDetails ? "− Hide details" : "+ Add steps, expected/actual result, environment"}
+          </button>
+
+          {showDetails && (
+            <div className="flex flex-col gap-4 rounded-lg bg-base-200 p-3">
+              <div>
+                <SectionLabel>Steps to reproduce</SectionLabel>
+                <StepsInput steps={steps} onChange={setSteps} />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <SectionLabel>Expected result</SectionLabel>
+                  <input
+                    type="text"
+                    className="input input-bordered w-full text-sm"
+                    value={expectedResult}
+                    onChange={(e) => setExpectedResult(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <SectionLabel>Actual result</SectionLabel>
+                  <input
+                    type="text"
+                    className="input input-bordered w-full text-sm"
+                    value={actualResult}
+                    onChange={(e) => setActualResult(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <SectionLabel>Environment</SectionLabel>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <input
+                    type="text"
+                    className="input input-bordered w-full text-sm"
+                    placeholder="Device (e.g. iPhone 14)"
+                    value={device}
+                    onChange={(e) => setDevice(e.target.value)}
+                  />
+                  <input
+                    type="text"
+                    className="input input-bordered w-full text-sm"
+                    placeholder="Browser (e.g. Safari 17)"
+                    value={browser}
+                    onChange={(e) => setBrowser(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <button type="submit" className="btn btn-primary self-start">
             Create
           </button>
@@ -398,7 +488,7 @@ export default function TeamBoardPage() {
       )}
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
           {COLUMNS.map((col) => {
             const bugsInColumn = bugs.filter((b) => b.status === col.status);
 

@@ -7,12 +7,17 @@ export const createBugSchema = z.object({
   stepsToReproduce: z.array(z.string()).optional(),
   expectedResult: z.string().optional(),
   actualResult: z.string().optional(),
+  environment: z
+    .object({
+      device: z.string().optional(),
+      browser: z.string().optional(),
+    })
+    .optional(),
   severity: z.enum(["low", "medium", "high", "critical"]).optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
   assignee: z.string().optional(),
 });
 
-// Used when changing a bug's status (PATCH /bugs/:id/status)
 export const updateStatusSchema = z.object({
   status: z.enum([
     "open",
@@ -24,8 +29,6 @@ export const updateStatusSchema = z.object({
   ]),
 });
 
-// Used when assigning/unassigning a bug (PATCH /bugs/:id/assign).
-// assignee is nullable — sending null clears the assignment.
 export const assignBugSchema = z.object({
   assignee: z.string().nullable(),
 });
