@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getBug,
+  updateBug,
   updateBugStatus,
   assignBug,
   deleteBug,
@@ -14,7 +15,11 @@ import {
 } from "../controllers/comments";
 import { requireAuth } from "../middleware/auth";
 import { validate } from "../middleware/validate";
-import { updateStatusSchema, assignBugSchema } from "../schemas/bugSchemas";
+import {
+  updateBugSchema,
+  updateStatusSchema,
+  assignBugSchema,
+} from "../schemas/bugSchemas";
 import { createCommentSchema } from "../schemas/commentSchemas";
 import { upload } from "../middleware/upload";
 
@@ -24,6 +29,7 @@ const router = Router();
 
 // Bug detail
 router.get("/:id", requireAuth, getBug);
+router.patch("/:id", requireAuth, validate(updateBugSchema), updateBug);
 router.patch(
   "/:id/status",
   requireAuth,

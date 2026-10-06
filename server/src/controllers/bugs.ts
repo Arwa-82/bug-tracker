@@ -40,6 +40,32 @@ export const getBug = asyncHandler(async (req: Request, res: Response) => {
   res.json({ bug });
 });
 
+// PATCH /bugs/:id — edits a bug's content fields (title, steps,
+// expected/actual result, environment, severity, priority, labels).
+// Any team member can edit — not restricted to reporter/admin, since
+// fixing a typo or adding missed details is something any teammate
+// should be able to do.
+export const updateBug = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user._id;
+
+  const bug = await Bug.findById(req.params.id);
+  if (!bug) {
+    return res.status(404).json({ message: "Bug not found" });
+  }
+
+  const membership = await Membership.findOne({ team: bug.team, user: userId });
+  if (!membership) {
+    return res.status(403).json({ message: "You are not a member of this bug's team" });
+  }
+
+  // Only apply fields that were actually sent — req.body only contains
+  // whatever the frontend included, thanks to the schema's .optional() fields
+  Object.assign(bug, req.body);
+  await bug.save();
+
+  res.json({ bug });
+});
+
 // PATCH /bugs/:id/status — the core workflow endpoint.
 export const updateBugStatus = asyncHandler(async (req: Request, res: Response) => {
   const { status: newStatus } = req.body;
@@ -82,11 +108,9 @@ export const updateBugStatus = asyncHandler(async (req: Request, res: Response) 
 });
 
 // PATCH /bugs/:id/assign — sets or clears a bug's assignee.
-// The assignee must be a member of the bug's team — you can't assign
-// a bug to someone who has no access to see or work on it.
 export const assignBug = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { assignee } = req.body; // a userId string, or null to unassign
+  const { assignee } = req.body;
   const userId = (req as any).user._id;
 
   const bug = await Bug.findById(id);
@@ -94,7 +118,6 @@ export const assignBug = asyncHandler(async (req: Request, res: Response) => {
     return res.status(404).json({ message: "Bug not found" });
   }
 
-  // Confirm the requester is a member of this bug's team
   const requesterMembership = await Membership.findOne({
     team: bug.team,
     user: userId,
@@ -103,9 +126,6 @@ export const assignBug = asyncHandler(async (req: Request, res: Response) => {
     return res.status(403).json({ message: "You are not a member of this bug's team" });
   }
 
-  // If assigning to someone (not unassigning), confirm THAT person is
-  // also a member of this team — otherwise a bug could get assigned to
-  // someone with no way to see or act on it.
   if (assignee) {
     const assigneeMembership = await Membership.findOne({
       team: bug.team,
