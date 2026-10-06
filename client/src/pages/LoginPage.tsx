@@ -1,26 +1,60 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { login } from "../api/auth";
-import { Link } from "react-router-dom";
+
+// Simple eye / eye-off icons, inline so no extra icon library is needed
+// just for this one toggle. 16x16, inherits currentColor.
+function EyeIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-7 0-11-8-11-8a18.46 18.46 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+      <path d="M1 1l22 22" />
+    </svg>
+  );
+}
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  function validate(): string | null {
+    if (!email.trim()) return "Enter your email.";
+    if (!password) return "Enter your password.";
+    return null;
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setLoading(true);
 
+    const validationError = validate();
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
+
+    setLoading(true);
     try {
       const { token } = await login(email, password);
       localStorage.setItem("token", token);
       navigate("/teams");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(
+        err instanceof Error ? err.message : "Incorrect email or password."
+      );
     } finally {
       setLoading(false);
     }
@@ -32,34 +66,41 @@ export default function LoginPage() {
         <div className="card-body">
           <h2 className="card-title">Log in</h2>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+          <form onSubmit={handleSubmit} noValidate className="flex flex-col gap-3">
             <label className="form-control">
               <span className="label-text mb-1">Email</span>
               <input
                 type="email"
-                className="input input-bordered w-full"
+                className={`input input-bordered w-full ${error ? "input-error" : ""}`}
                 placeholder="name@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                required
               />
             </label>
 
             <label className="form-control">
               <span className="label-text mb-1">Password</span>
-              <input
-                type="password"
-                className="input input-bordered w-full"
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  className={`input input-bordered w-full pr-10 ${error ? "input-error" : ""}`}
+                  placeholder="••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-base-content/40 hover:text-base-content"
+                  tabIndex={-1}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOffIcon /> : <EyeIcon />}
+                </button>
+              </div>
             </label>
 
-            {error && (
-              <p className="text-sm text-error">{error}</p>
-            )}
+            {error && <p className="text-sm text-error">{error}</p>}
 
             <button
               type="submit"
@@ -69,13 +110,19 @@ export default function LoginPage() {
               {loading ? "Logging in..." : "Log in"}
             </button>
           </form>
-          {/* Link to the register page for people without an account yet */}
-           <p className="mt-2 text-center text-sm">
-            No account?{" "}
-           <Link to="/register" className="link link-primary">
-            Register
+
+          <p className="mt-1 text-center text-sm">
+            <Link to="/forgot-password" className="link link-primary">
+              Forgot password?
             </Link>
-            </p>
+          </p>
+
+          <p className="mt-2 text-center text-sm">
+            No account?{" "}
+            <Link to="/register" className="link link-primary">
+              Register
+            </Link>
+          </p>
         </div>
       </div>
     </div>

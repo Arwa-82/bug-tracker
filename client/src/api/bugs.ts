@@ -1,6 +1,5 @@
 import { apiFetch } from "./client";
 
-// Matches the backend's Bug model shape (server/src/models/Bug.ts).
 export type BugStatus =
   | "open"
   | "in_progress"
@@ -12,12 +11,16 @@ export type BugStatus =
 export type BugSeverity = "low" | "medium" | "high" | "critical";
 export type BugPriority = "low" | "medium" | "high";
 
-// One uploaded file attached to a bug
 export interface Attachment {
   url: string;
   filename: string;
   mimetype: string;
   uploadedBy: string;
+}
+
+export interface Environment {
+  device: string;
+  browser: string;
 }
 
 export interface Bug {
@@ -27,6 +30,7 @@ export interface Bug {
   stepsToReproduce: string[];
   expectedResult: string;
   actualResult: string;
+  environment: Environment;
   severity: BugSeverity;
   priority: BugPriority;
   status: BugStatus;
@@ -44,7 +48,15 @@ export function getTeamBugs(teamId: string) {
 // Creates a new bug on a team's board
 export function createBug(
   teamId: string,
-  data: { title: string; severity?: BugSeverity; priority?: BugPriority }
+  data: {
+    title: string;
+    severity?: BugSeverity;
+    priority?: BugPriority;
+    stepsToReproduce?: string[];
+    expectedResult?: string;
+    actualResult?: string;
+    environment?: Environment;
+  }
 ) {
   return apiFetch<{ bug: Bug }>(`/teams/${teamId}/bugs`, {
     method: "POST",
@@ -57,6 +69,27 @@ export function getBug(bugId: string) {
   return apiFetch<{ bug: Bug }>(`/bugs/${bugId}`);
 }
 
+// Edits a bug's content fields. Pass only the fields you want to change —
+// the backend only updates what's included in the request body.
+export function updateBug(
+  bugId: string,
+  data: Partial<{
+    title: string;
+    description: string;
+    stepsToReproduce: string[];
+    expectedResult: string;
+    actualResult: string;
+    environment: Environment;
+    severity: BugSeverity;
+    priority: BugPriority;
+  }>
+) {
+  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
 // Moves a bug to a new status
 export function updateBugStatus(bugId: string, status: BugStatus) {
   return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/status`, {
@@ -65,12 +98,27 @@ export function updateBugStatus(bugId: string, status: BugStatus) {
   });
 }
 
-// Permanently deletes a bug. Only the reporter or a team admin can do this —
-// the backend enforces that; this call will throw if the user isn't allowed.
+// Sets or clears a bug's assignee. Pass null to unassign.
+export function assignBug(bugId: string, assignee: string | null) {
+  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/assign`, {
+    method: "PATCH",
+    body: JSON.stringify({ assignee }),
+  });
+}
+
+// Permanently deletes a bug
 export function deleteBug(bugId: string) {
   return apiFetch<{ message: string }>(`/bugs/${bugId}`, {
     method: "DELETE",
   });
+}
+
+// Deletes one attachment from a bug, identified by its array index
+export function deleteBugAttachment(bugId: string, attachmentIndex: number) {
+  return apiFetch<{ bug: Bug }>(
+    `/bugs/${bugId}/attachments/${attachmentIndex}`,
+    { method: "DELETE" }
+  );
 }
 
 // Uploads a file (image or video) to a bug.
@@ -100,19 +148,4 @@ export async function uploadBugAttachment(bugId: string, file: File) {
   }
 
   return data as { bug: Bug };
-}
-// Deletes one attachment from a bug, identified by its array index
-// (attachments don't have their own database id — see backend note).
-export function deleteBugAttachment(bugId: string, attachmentIndex: number) {
-  return apiFetch<{ bug: Bug }>(
-    `/bugs/${bugId}/attachments/${attachmentIndex}`,
-    { method: "DELETE" }
-  );
-}
-// Sets or clears a bug's assignee. Pass null to unassign.
-export function assignBug(bugId: string, assignee: string | null) {
-  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/assign`, {
-    method: "PATCH",
-    body: JSON.stringify({ assignee }),
-  });
 }
