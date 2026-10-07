@@ -1,9 +1,9 @@
 import { Request, Response } from "express";
-import { Bug, Membership } from "../models";
+import { Bug, Membership, Activity } from "../models";
 import { canTransition } from "../services/statusWorkflow";
+import { logActivity } from "../services/activityService";
 import { asyncHandler } from "../middleware/errorHandler";
 
-// GET /teams/:teamId/bugs — list bugs for one team, with optional filters
 export const getTeamBugs = asyncHandler(async (req: Request, res: Response) => {
   const { teamId } = req.params;
   const { status, severity, assignee } = req.query;
@@ -17,7 +17,6 @@ export const getTeamBugs = asyncHandler(async (req: Request, res: Response) => {
   res.json({ bugs });
 });
 
-// POST /teams/:teamId/bugs — create a new bug on this team's board
 export const createBug = asyncHandler(async (req: Request, res: Response) => {
   const { teamId } = req.params;
   const userId = (req as any).user._id;
@@ -31,7 +30,6 @@ export const createBug = asyncHandler(async (req: Request, res: Response) => {
   res.status(201).json({ bug });
 });
 
-// GET /bugs/:id — fetch a single bug's full detail
 export const getBug = asyncHandler(async (req: Request, res: Response) => {
   const bug = await Bug.findById(req.params.id);
   if (!bug) {
@@ -40,11 +38,6 @@ export const getBug = asyncHandler(async (req: Request, res: Response) => {
   res.json({ bug });
 });
 
-// PATCH /bugs/:id — edits a bug's content fields (title, steps,
-// expected/actual result, environment, severity, priority, labels).
-// Any team member can edit — not restricted to reporter/admin, since
-// fixing a typo or adding missed details is something any teammate
-// should be able to do.
 export const updateBug = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
 
@@ -58,15 +51,20 @@ export const updateBug = asyncHandler(async (req: Request, res: Response) => {
     return res.status(403).json({ message: "You are not a member of this bug's team" });
   }
 
-  // Only apply fields that were actually sent — req.body only contains
-  // whatever the frontend included, thanks to the schema's .optional() fields
+  const changedFields = Object.keys(req.body).filter(
+    (key) => JSON.stringify((bug as any)[key]) !== JSON.stringify(req.body[key])
+  );
+
   Object.assign(bug, req.body);
   await bug.save();
+
+  if (changedFields.length > 0) {
+    await logActivity(bug._id, userId, "bug_updated", { fields: changedFields });
+  }
 
   res.json({ bug });
 });
 
-// PATCH /bugs/:id/status — the core workflow endpoint.
 export const updateBugStatus = asyncHandler(async (req: Request, res: Response) => {
   const { status: newStatus } = req.body;
   const userId = (req as any).user._id;
@@ -101,13 +99,18 @@ export const updateBugStatus = asyncHandler(async (req: Request, res: Response) 
     });
   }
 
+  const previousStatus = bug.status;
   bug.status = newStatus;
   await bug.save();
+
+  await logActivity(bug._id, userId, "status_changed", {
+    from: previousStatus,
+    to: newStatus,
+  });
 
   res.json({ bug });
 });
 
-// PATCH /bugs/:id/assign — sets or clears a bug's assignee.
 export const assignBug = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const { assignee } = req.body;
@@ -141,10 +144,16 @@ export const assignBug = asyncHandler(async (req: Request, res: Response) => {
   bug.assignee = assignee || null;
   await bug.save();
 
+  await logActivity(
+    bug._id,
+    userId,
+    assignee ? "assigned" : "unassigned",
+    { assignee: assignee || null }
+  );
+
   res.json({ bug });
 });
 
-// DELETE /bugs/:id — permanently deletes a bug.
 export const deleteBug = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
 
@@ -172,7 +181,6 @@ export const deleteBug = asyncHandler(async (req: Request, res: Response) => {
   res.json({ message: "Bug deleted" });
 });
 
-// POST /bugs/:id/attachments — upload an image or video to a bug.
 export const addBugAttachment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
   const file = req.file;
@@ -195,10 +203,13 @@ export const addBugAttachment = asyncHandler(async (req: Request, res: Response)
 
   await bug.save();
 
+  await logActivity(bug._id, userId, "attachment_added", {
+    filename: file.originalname,
+  });
+
   res.status(201).json({ bug });
 });
 
-// DELETE /bugs/:id/attachments/:attachmentId — removes one attachment
 export const deleteBugAttachment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
   const { id, attachmentId } = req.params;
@@ -229,8 +240,25 @@ export const deleteBugAttachment = asyncHandler(async (req: Request, res: Respon
     });
   }
 
+  const removedFilename = attachment.filename;
   bug.attachments.splice(index, 1);
   await bug.save();
 
+  await logActivity(bug._id, userId, "attachment_removed", {
+    filename: removedFilename,
+  });
+
   res.json({ bug });
+});
+
+// GET /bugs/:id/activity — fetch the timeline of events for a bug,
+// oldest first so it reads top-to-bottom like a history log
+export const getBugActivity = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const activity = await Activity.find({ bug: id })
+    .populate("actor", "name email")
+    .sort({ createdAt: 1 });
+
+  res.json({ activity });
 });

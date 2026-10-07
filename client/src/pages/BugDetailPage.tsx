@@ -17,6 +17,9 @@ import {
 import type { Comment } from "../api/comments";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
+import { getBugActivity } from "../api/activity";
+import type { Activity } from "../api/activity";
+import ActivityTimeline from "../components/ActivityTimeline";
 import StepsInput from "../components/StepsInput";
 import LabelsInput from "../components/LabelsInput";
 
@@ -58,6 +61,7 @@ export default function BugDetailPage() {
   const [bug, setBug] = useState<Bug | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
+  const [activity, setActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -99,12 +103,14 @@ export default function BugDetailPage() {
       const bugRes = await getBug(bugId);
       setBug(bugRes.bug);
 
-      const [commentsRes, membersRes] = await Promise.all([
+      const [commentsRes, membersRes, activityRes] = await Promise.all([
         getBugComments(bugId),
         getTeamMembers(bugRes.bug.team),
+        getBugActivity(bugId),
       ]);
       setComments(commentsRes.comments);
       setMembers(membersRes.members);
+      setActivity(activityRes.activity);
     } catch (err) {
       setPageError(err instanceof Error ? err.message : "Failed to load bug");
     } finally {
@@ -122,6 +128,8 @@ export default function BugDetailPage() {
     try {
       const res = await updateBugStatus(bug.id, newStatus);
       setBug(res.bug);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Status change failed");
     } finally {
@@ -135,6 +143,8 @@ export default function BugDetailPage() {
     try {
       const res = await assignBug(bug.id, userId || null);
       setBug(res.bug);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update assignee");
     } finally {
@@ -148,6 +158,8 @@ export default function BugDetailPage() {
     try {
       const res = await updateBug(bug.id, { severity: value });
       setBug(res.bug);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update severity");
     } finally {
@@ -161,6 +173,8 @@ export default function BugDetailPage() {
     try {
       const res = await updateBug(bug.id, { priority: value });
       setBug(res.bug);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update priority");
     } finally {
@@ -184,6 +198,8 @@ export default function BugDetailPage() {
       const res = await updateBug(bug.id, { title: titleDraft.trim() });
       setBug(res.bug);
       setEditingTitle(false);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update title");
     } finally {
@@ -224,6 +240,8 @@ export default function BugDetailPage() {
       });
       setBug(res.bug);
       setEditingDetails(false);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to update details");
     } finally {
@@ -240,6 +258,8 @@ export default function BugDetailPage() {
       const res = await addBugComment(bugId, commentText);
       setComments((prev) => [...prev, res.comment]);
       setCommentText("");
+      const activityRes = await getBugActivity(bugId);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to add comment");
     } finally {
@@ -256,6 +276,8 @@ export default function BugDetailPage() {
     try {
       const res = await uploadBugAttachment(bugId, file);
       setBug(res.bug);
+      const activityRes = await getBugActivity(bugId);
+      setActivity(activityRes.activity);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Upload failed");
     } finally {
@@ -276,6 +298,8 @@ export default function BugDetailPage() {
         setComments((prev) => prev.filter((c) => c.id !== pendingDelete.id));
       }
       setPendingDelete(null);
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to delete");
     } finally {
@@ -332,7 +356,6 @@ export default function BugDetailPage() {
         )}
       </div>
 
-      {/* Label chips shown just below the title, when not editing */}
       {!editingTitle && bug.labels.length > 0 && (
         <div className="mb-4 -mt-2 flex flex-wrap gap-1.5 px-1">
           {bug.labels.map((label) => (
@@ -622,6 +645,12 @@ export default function BugDetailPage() {
                 {postingComment ? "Posting..." : "Post"}
               </button>
             </form>
+          </div>
+
+          {/* Activity timeline — read-only history of changes to this bug */}
+          <div className="card bg-base-100 p-5 shadow">
+            <h2 className="mb-3 font-medium">Activity</h2>
+            <ActivityTimeline activity={activity} />
           </div>
         </div>
 

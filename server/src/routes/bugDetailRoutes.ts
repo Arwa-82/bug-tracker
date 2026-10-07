@@ -7,6 +7,7 @@ import {
   deleteBug,
   addBugAttachment,
   deleteBugAttachment,
+  getBugActivity,
 } from "../controllers/bugs";
 import {
   getBugComments,
@@ -25,9 +26,6 @@ import { upload } from "../middleware/upload";
 
 const router = Router();
 
-// Mounted at /api/bugs in app.ts
-
-// Bug detail
 router.get("/:id", requireAuth, getBug);
 router.patch("/:id", requireAuth, validate(updateBugSchema), updateBug);
 router.patch(
@@ -36,15 +34,10 @@ router.patch(
   validate(updateStatusSchema),
   updateBugStatus
 );
-router.patch(
-  "/:id/assign",
-  requireAuth,
-  validate(assignBugSchema),
-  assignBug
-);
+router.patch("/:id/assign", requireAuth, validate(assignBugSchema), assignBug);
 router.delete("/:id", requireAuth, deleteBug);
+router.get("/:id/activity", requireAuth, getBugActivity);
 
-// Comments on a bug
 router.get("/:id/comments", requireAuth, getBugComments);
 router.post(
   "/:id/comments",
@@ -54,7 +47,6 @@ router.post(
 );
 router.delete("/comments/:commentId", requireAuth, deleteComment);
 
-// File attachments on a bug
 router.post(
   "/:id/attachments",
   requireAuth,
