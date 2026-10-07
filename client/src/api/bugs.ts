@@ -39,6 +39,7 @@ export interface Bug {
   assignee: string | null;
   labels: string[];
   attachments: Attachment[];
+  linkedBugs: string[];
 }
 
 // Fetches all bugs for one team's board
@@ -151,4 +152,40 @@ export async function uploadBugAttachment(bugId: string, file: File) {
   }
 
   return data as { bug: Bug };
+}
+// Shape of a bug when it's shown as a search result or linked-bug summary —
+// includes the team name/key so cross-team context is visible, unlike
+// the plain Bug type which only has a team id.
+export interface BugWithTeam extends Omit<Bug, "team"> {
+  team: { id: string; name: string; key: string };
+}
+
+// Searches bug titles across every team the current user belongs to.
+// Used for the "link to another bug" picker.
+export function searchBugs(query: string) {
+  return apiFetch<{ bugs: BugWithTeam[] }>(
+    `/bugs/search?q=${encodeURIComponent(query)}`
+  );
+}
+
+// Fetches the bugs linked to this one. Bugs on teams the user can't
+// access are already filtered out by the backend.
+export function getLinkedBugs(bugId: string) {
+  return apiFetch<{ linkedBugs: BugWithTeam[] }>(`/bugs/${bugId}/links`);
+}
+
+// Links this bug to another one. Requires the user to be a member of
+// both bugs' teams — the backend enforces that; this call throws if not.
+export function linkBug(bugId: string, linkedBugId: string) {
+  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/links`, {
+    method: "POST",
+    body: JSON.stringify({ linkedBugId }),
+  });
+}
+
+// Removes a link between two bugs
+export function unlinkBug(bugId: string, linkedBugId: string) {
+  return apiFetch<{ bug: Bug }>(`/bugs/${bugId}/links/${linkedBugId}`, {
+    method: "DELETE",
+  });
 }

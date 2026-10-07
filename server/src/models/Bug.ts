@@ -18,8 +18,6 @@ export interface IAttachment {
   uploadedBy: Types.ObjectId;
 }
 
-// Device/browser context the bug was observed in — helps whoever picks
-// it up reproduce it without having to ask the reporter follow-up questions.
 export interface IEnvironment {
   device: string;
   browser: string;
@@ -41,6 +39,11 @@ export interface IBug extends Document {
   assignee: Types.ObjectId | null;
   labels: string[];
   attachments: IAttachment[];
+  // Other bugs this one is related to — can be on a different team.
+  // Stored as a plain array of ObjectIds (not populated automatically)
+  // so the controller can control exactly what gets exposed, since a
+  // linked bug might belong to a team the viewer isn't a member of.
+  linkedBugs: Types.ObjectId[];
 }
 
 const attachmentSchema = new Schema<IAttachment>(
@@ -58,7 +61,7 @@ const environmentSchema = new Schema<IEnvironment>(
     device: { type: String, default: "" },
     browser: { type: String, default: "" },
   },
-  { _id: false } // just a plain sub-object, no need for its own id
+  { _id: false }
 );
 
 const bugSchema = new Schema<IBug>(
@@ -89,6 +92,7 @@ const bugSchema = new Schema<IBug>(
     assignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
     labels: { type: [String], default: [] },
     attachments: { type: [attachmentSchema], default: [] },
+    linkedBugs: { type: [Schema.Types.ObjectId], ref: "Bug", default: [] },
   },
   {
     timestamps: true,

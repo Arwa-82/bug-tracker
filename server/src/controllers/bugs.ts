@@ -262,3 +262,148 @@ export const getBugActivity = asyncHandler(async (req: Request, res: Response) =
 
   res.json({ activity });
 });
+// GET /bugs/search?q=... — searches bug titles across every team the
+// requester is a member of. Used by the "link to another bug" picker,
+// since a link can only be created between bugs on teams the user
+// actually belongs to.
+export const searchBugs = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req as any).user._id;
+  const { q } = req.query;
+
+  if (!q || typeof q !== "string" || q.trim().length < 2) {
+    return res.json({ bugs: [] }); // avoid a huge unfiltered result for a 1-char query
+  }
+
+  // Find every team this user belongs to, then search bugs only within those
+  const memberships = await Membership.find({ user: userId });
+  const teamIds = memberships.map((m) => m.team);
+
+  const bugs = await Bug.find({
+    team: { $in: teamIds },
+    title: { $regex: q.trim(), $options: "i" },
+  })
+    .limit(10)
+    .populate("team", "name key");
+
+  res.json({ bugs });
+});
+
+// POST /bugs/:id/links — links this bug to another bug.
+// Requires the requester to be a member of BOTH bugs' teams, so a link
+// never exposes a bug from a team the user has no access to.
+export const linkBug = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { linkedBugId } = req.body;
+  const userId = (req as any).user._id;
+
+  if (id === linkedBugId) {
+    return res.status(400).json({ message: "A bug cannot be linked to itself" });
+  }
+
+  const bug = await Bug.findById(id);
+  if (!bug) {
+    return res.status(404).json({ message: "Bug not found" });
+  }
+
+  const linkedBug = await Bug.findById(linkedBugId);
+  if (!linkedBug) {
+    return res.status(404).json({ message: "The bug you're linking to was not found" });
+  }
+
+  // Confirm the requester belongs to BOTH teams
+  const [membershipA, membershipB] = await Promise.all([
+    Membership.findOne({ team: bug.team, user: userId }),
+    Membership.findOne({ team: linkedBug.team, user: userId }),
+  ]);
+
+  if (!membershipA || !membershipB) {
+    return res.status(403).json({
+      message: "You must be a member of both teams to link these bugs",
+    });
+  }
+
+  // Avoid duplicate links
+  if (bug.linkedBugs.some((b) => b.toString() === linkedBugId)) {
+    return res.status(409).json({ message: "These bugs are already linked" });
+  }
+
+  // Links are bidirectional — add the reference on both bugs so the
+  // connection shows up when viewing either one
+  bug.linkedBugs.push(linkedBug._id);
+  linkedBug.linkedBugs.push(bug._id);
+  await bug.save();
+  await linkedBug.save();
+
+  await logActivity(bug._id, userId, "bug_updated", {
+    fields: ["linkedBugs"],
+  });
+
+  res.status(201).json({ bug });
+});
+
+// DELETE /bugs/:id/links/:linkedBugId — removes a link between two bugs
+export const unlinkBug = asyncHandler(async (req: Request, res: Response) => {
+  const { id, linkedBugId } = req.params;
+  const userId = (req as any).user._id;
+
+  const bug = await Bug.findById(id);
+  if (!bug) {
+    return res.status(404).json({ message: "Bug not found" });
+  }
+
+  const membership = await Membership.findOne({ team: bug.team, user: userId });
+  if (!membership) {
+    return res.status(403).json({ message: "You are not a member of this bug's team" });
+  }
+
+  bug.linkedBugs = bug.linkedBugs.filter((b) => b.toString() !== linkedBugId);
+  await bug.save();
+
+  // Also remove the reverse link, if the other bug still exists
+  const linkedBug = await Bug.findById(linkedBugId);
+  if (linkedBug) {
+    linkedBug.linkedBugs = linkedBug.linkedBugs.filter(
+      (b) => b.toString() !== id
+    );
+    await linkedBug.save();
+  }
+
+  await logActivity(bug._id, userId, "bug_updated", {
+    fields: ["linkedBugs"],
+  });
+
+  res.json({ bug });
+});
+
+// GET /bugs/:id/links — fetch the bugs linked to this one, but only
+// returns details for links where the requester is ALSO a member of
+// that linked bug's team. Links to teams the user can't access are
+// filtered out entirely rather than leaking partial info.
+export const getLinkedBugs = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const userId = (req as any).user._id;
+
+  const bug = await Bug.findById(id);
+  if (!bug) {
+    return res.status(404).json({ message: "Bug not found" });
+  }
+
+  if (bug.linkedBugs.length === 0) {
+    return res.json({ linkedBugs: [] });
+  }
+
+  const candidates = await Bug.find({ _id: { $in: bug.linkedBugs } }).populate(
+    "team",
+    "name key"
+  );
+
+  // Filter down to only bugs on teams the requester actually belongs to
+  const memberships = await Membership.find({ user: userId });
+  const accessibleTeamIds = new Set(memberships.map((m) => m.team.toString()));
+
+  const visible = candidates.filter((c: any) =>
+    accessibleTeamIds.has(c.team._id.toString())
+  );
+
+  res.json({ linkedBugs: visible });
+});
