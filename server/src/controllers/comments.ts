@@ -1,8 +1,8 @@
 import { Request, Response } from "express";
 import { Comment, Bug, Membership } from "../models";
+import { logActivity } from "../services/activityService";
 import { asyncHandler } from "../middleware/errorHandler";
 
-// GET /bugs/:id/comments — list all comments for one bug, oldest first
 export const getBugComments = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -13,7 +13,6 @@ export const getBugComments = asyncHandler(async (req: Request, res: Response) =
   res.json({ comments });
 });
 
-// POST /bugs/:id/comments — add a new comment to a bug
 export const addBugComment = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const userId = (req as any).user._id;
@@ -27,11 +26,11 @@ export const addBugComment = asyncHandler(async (req: Request, res: Response) =>
 
   await comment.populate("author", "name email");
 
+  await logActivity(id, userId, "comment_added", {});
+
   res.status(201).json({ comment });
 });
 
-// DELETE /comments/:commentId — deletes a comment.
-// Only the comment's author or a team admin (of the bug's team) can delete it.
 export const deleteComment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
   const { commentId } = req.params;
@@ -41,7 +40,6 @@ export const deleteComment = asyncHandler(async (req: Request, res: Response) =>
     return res.status(404).json({ message: "Comment not found" });
   }
 
-  // Need the bug to find its team, to check if the user is an admin there
   const bug = await Bug.findById(comment.bug);
   if (!bug) {
     return res.status(404).json({ message: "Associated bug not found" });
