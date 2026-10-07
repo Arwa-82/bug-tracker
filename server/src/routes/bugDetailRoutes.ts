@@ -8,6 +8,10 @@ import {
   addBugAttachment,
   deleteBugAttachment,
   getBugActivity,
+  searchBugs,
+  linkBug,
+  unlinkBug,
+  getLinkedBugs,
 } from "../controllers/bugs";
 import {
   getBugComments,
@@ -20,11 +24,16 @@ import {
   updateBugSchema,
   updateStatusSchema,
   assignBugSchema,
+  linkBugSchema,
 } from "../schemas/bugSchemas";
 import { createCommentSchema } from "../schemas/commentSchemas";
 import { upload } from "../middleware/upload";
 
 const router = Router();
+
+// IMPORTANT: /search must be declared BEFORE /:id, otherwise Express
+// would match "search" as if it were a bug id and route it to getBug instead.
+router.get("/search", requireAuth, searchBugs);
 
 router.get("/:id", requireAuth, getBug);
 router.patch("/:id", requireAuth, validate(updateBugSchema), updateBug);
@@ -37,6 +46,11 @@ router.patch(
 router.patch("/:id/assign", requireAuth, validate(assignBugSchema), assignBug);
 router.delete("/:id", requireAuth, deleteBug);
 router.get("/:id/activity", requireAuth, getBugActivity);
+
+// Linked issues
+router.get("/:id/links", requireAuth, getLinkedBugs);
+router.post("/:id/links", requireAuth, validate(linkBugSchema), linkBug);
+router.delete("/:id/links/:linkedBugId", requireAuth, unlinkBug);
 
 router.get("/:id/comments", requireAuth, getBugComments);
 router.post(

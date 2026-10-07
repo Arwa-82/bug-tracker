@@ -7,8 +7,10 @@ import {
   uploadBugAttachment,
   deleteBugAttachment,
   assignBug,
+  getLinkedBugs,
+  unlinkBug,
 } from "../api/bugs";
-import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
+import type { Bug, BugStatus, BugSeverity, BugPriority, BugWithTeam } from "../api/bugs";
 import {
   getBugComments,
   addBugComment,
@@ -22,6 +24,7 @@ import type { Activity } from "../api/activity";
 import ActivityTimeline from "../components/ActivityTimeline";
 import StepsInput from "../components/StepsInput";
 import LabelsInput from "../components/LabelsInput";
+import LinkBugPicker from "../components/LinkBugPicker";
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
   open: ["in_progress"],
@@ -62,6 +65,7 @@ export default function BugDetailPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
+  const [linkedBugs, setLinkedBugs] = useState<BugWithTeam[]>([]);
   const [loading, setLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -95,6 +99,9 @@ export default function BugDetailPage() {
   const [draftBrowser, setDraftBrowser] = useState("");
   const [draftLabels, setDraftLabels] = useState<string[]>([]);
 
+  const [showLinkPicker, setShowLinkPicker] = useState(false);
+  const [unlinkingId, setUnlinkingId] = useState<string | null>(null);
+
   async function loadData() {
     if (!bugId) return;
     setLoading(true);
@@ -103,14 +110,16 @@ export default function BugDetailPage() {
       const bugRes = await getBug(bugId);
       setBug(bugRes.bug);
 
-      const [commentsRes, membersRes, activityRes] = await Promise.all([
+      const [commentsRes, membersRes, activityRes, linkedRes] = await Promise.all([
         getBugComments(bugId),
         getTeamMembers(bugRes.bug.team),
         getBugActivity(bugId),
+        getLinkedBugs(bugId),
       ]);
       setComments(commentsRes.comments);
       setMembers(membersRes.members);
       setActivity(activityRes.activity);
+      setLinkedBugs(linkedRes.linkedBugs);
     } catch (err) {
       setPageError(err instanceof Error ? err.message : "Failed to load bug");
     } finally {
@@ -305,6 +314,27 @@ export default function BugDetailPage() {
     } finally {
       setDeleting(false);
     }
+  }
+
+  async function handleUnlink(linkedBugId: string) {
+    if (!bug) return;
+    setUnlinkingId(linkedBugId);
+    try {
+      await unlinkBug(bug.id, linkedBugId);
+      setLinkedBugs((prev) => prev.filter((b) => b.id !== linkedBugId));
+      const activityRes = await getBugActivity(bug.id);
+      setActivity(activityRes.activity);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to unlink");
+    } finally {
+      setUnlinkingId(null);
+    }
+  }
+
+  async function refreshLinkedBugs() {
+    if (!bugId) return;
+    const res = await getLinkedBugs(bugId);
+    setLinkedBugs(res.linkedBugs);
   }
 
   if (loading) {
@@ -597,6 +627,53 @@ export default function BugDetailPage() {
             )}
           </div>
 
+          {/* Linked issues — can span across teams. Only shows bugs on
+              teams the current user can actually access. */}
+          <div className="card bg-base-100 p-5 shadow">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="font-medium">Linked issues</h2>
+              <button
+                onClick={() => setShowLinkPicker(true)}
+                className="btn btn-ghost btn-xs"
+              >
+                + Link bug
+              </button>
+            </div>
+
+            {linkedBugs.length === 0 ? (
+              <p className="text-sm text-base-content/60">
+                No linked issues yet.
+              </p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {linkedBugs.map((lb) => (
+                  <div
+                    key={lb.id}
+                    className="flex items-center justify-between rounded-lg bg-base-200 p-2.5"
+                  >
+                    <Link
+                      to={`/bugs/${lb.id}`}
+                      className="text-sm font-medium hover:underline"
+                    >
+                      {lb.title}
+                      <span className="ml-2 text-xs font-normal text-base-content/50">
+                        {lb.team.name} ({lb.team.key})
+                      </span>
+                    </Link>
+                    <button
+                      onClick={() => handleUnlink(lb.id)}
+                      disabled={unlinkingId === lb.id}
+                      className="text-base-content/40 hover:text-error"
+                      title="Remove link"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="card bg-base-100 p-5 shadow">
             <h2 className="mb-3 font-medium">Comments</h2>
             <div className="mb-4 flex flex-col gap-3">
@@ -794,6 +871,14 @@ export default function BugDetailPage() {
             onClick={() => !deleting && setPendingDelete(null)}
           />
         </div>
+      )}
+
+      {showLinkPicker && bug && (
+        <LinkBugPicker
+          currentBugId={bug.id}
+          onLinked={refreshLinkedBugs}
+          onClose={() => setShowLinkPicker(false)}
+        />
       )}
     </div>
   );

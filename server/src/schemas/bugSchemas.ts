@@ -49,3 +49,8 @@ export const updateStatusSchema = z.object({
 export const assignBugSchema = z.object({
   assignee: z.string().nullable(),
 });
+
+// Used when linking one bug to another
+export const linkBugSchema = z.object({
+  linkedBugId: z.string().min(1, "linkedBugId is required"),
+});
