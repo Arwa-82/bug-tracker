@@ -33,3 +33,10 @@ export async function apiFetch<T>(
 
   return data as T;
 }
+// Permanently deletes a bug. Only the reporter or a team admin can do this —
+// the backend enforces that; this call will throw if the user isn't allowed.
+export function deleteBug(bugId: string) {
+  return apiFetch<{ message: string }>(`/bugs/${bugId}`, {
+    method: "DELETE",
+  });
+}

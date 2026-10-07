@@ -1,18 +1,40 @@
 import { z } from "zod";
 
-// Used when creating a new bug (POST /teams/:teamId/bugs)
 export const createBugSchema = z.object({
   title: z.string().min(1, "Title is required"),
   description: z.string().optional(),
   stepsToReproduce: z.array(z.string()).optional(),
   expectedResult: z.string().optional(),
   actualResult: z.string().optional(),
+  environment: z
+    .object({
+      device: z.string().optional(),
+      browser: z.string().optional(),
+    })
+    .optional(),
   severity: z.enum(["low", "medium", "high", "critical"]).optional(),
   priority: z.enum(["low", "medium", "high"]).optional(),
-  assignee: z.string().optional(), // a user id, validated for real membership in the controller
+  assignee: z.string().optional(),
+  labels: z.array(z.string()).optional(),
 });
 
-// Used when changing a bug's status (PATCH /bugs/:id/status)
+export const updateBugSchema = z.object({
+  title: z.string().min(1, "Title is required").optional(),
+  description: z.string().optional(),
+  stepsToReproduce: z.array(z.string()).optional(),
+  expectedResult: z.string().optional(),
+  actualResult: z.string().optional(),
+  environment: z
+    .object({
+      device: z.string().optional(),
+      browser: z.string().optional(),
+    })
+    .optional(),
+  severity: z.enum(["low", "medium", "high", "critical"]).optional(),
+  priority: z.enum(["low", "medium", "high"]).optional(),
+  labels: z.array(z.string()).optional(),
+});
+
 export const updateStatusSchema = z.object({
   status: z.enum([
     "open",
@@ -22,4 +44,13 @@ export const updateStatusSchema = z.object({
     "closed",
     "reopened",
   ]),
+});
+
+export const assignBugSchema = z.object({
+  assignee: z.string().nullable(),
+});
+
+// Used when linking one bug to another
+export const linkBugSchema = z.object({
+  linkedBugId: z.string().min(1, "linkedBugId is required"),
 });

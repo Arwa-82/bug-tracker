@@ -1,7 +1,5 @@
 import { Schema, model, Document, Types } from "mongoose";
 
-// The set of statuses a bug can be in. Kept as a TS union type so
-// the compiler catches typos anywhere we reference a status string.
 export type BugStatus =
   | "open"
   | "in_progress"
@@ -13,12 +11,16 @@ export type BugStatus =
 export type BugSeverity = "low" | "medium" | "high" | "critical";
 export type BugPriority = "low" | "medium" | "high";
 
-// One uploaded file attached to a bug — an image or a video
 export interface IAttachment {
   url: string;
   filename: string;
   mimetype: string;
   uploadedBy: Types.ObjectId;
+}
+
+export interface IEnvironment {
+  device: string;
+  browser: string;
 }
 
 export interface IBug extends Document {
@@ -29,6 +31,7 @@ export interface IBug extends Document {
   stepsToReproduce: string[];
   expectedResult: string;
   actualResult: string;
+  environment: IEnvironment;
   severity: BugSeverity;
   priority: BugPriority;
   status: BugStatus;
@@ -36,6 +39,11 @@ export interface IBug extends Document {
   assignee: Types.ObjectId | null;
   labels: string[];
   attachments: IAttachment[];
+  // Other bugs this one is related to — can be on a different team.
+  // Stored as a plain array of ObjectIds (not populated automatically)
+  // so the controller can control exactly what gets exposed, since a
+  // linked bug might belong to a team the viewer isn't a member of.
+  linkedBugs: Types.ObjectId[];
 }
 
 const attachmentSchema = new Schema<IAttachment>(
@@ -48,6 +56,14 @@ const attachmentSchema = new Schema<IAttachment>(
   { _id: false, timestamps: true }
 );
 
+const environmentSchema = new Schema<IEnvironment>(
+  {
+    device: { type: String, default: "" },
+    browser: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const bugSchema = new Schema<IBug>(
   {
     team: { type: Schema.Types.ObjectId, ref: "Team", required: true },
@@ -56,6 +72,7 @@ const bugSchema = new Schema<IBug>(
     stepsToReproduce: { type: [String], default: [] },
     expectedResult: { type: String, default: "" },
     actualResult: { type: String, default: "" },
+    environment: { type: environmentSchema, default: () => ({}) },
     severity: {
       type: String,
       enum: ["low", "medium", "high", "critical"],
@@ -75,13 +92,10 @@ const bugSchema = new Schema<IBug>(
     assignee: { type: Schema.Types.ObjectId, ref: "User", default: null },
     labels: { type: [String], default: [] },
     attachments: { type: [attachmentSchema], default: [] },
+    linkedBugs: { type: [Schema.Types.ObjectId], ref: "Bug", default: [] },
   },
   {
     timestamps: true,
-    // This transform runs automatically whenever a Bug document is
-    // converted to JSON (e.g. res.json({ bug })). It copies _id into
-    // a plain "id" string field and removes _id/__v, so the frontend
-    // can consistently use bug.id everywhere instead of bug._id.
     toJSON: {
       virtuals: true,
       transform: (_doc, ret) => {
@@ -94,7 +108,6 @@ const bugSchema = new Schema<IBug>(
   }
 );
 
-// Speeds up the board's main query: "give me all bugs for team X"
 bugSchema.index({ team: 1 });
 
 export const Bug = model<IBug>("Bug", bugSchema);
