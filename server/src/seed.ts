@@ -1,4 +1,5 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config();
 import { connectDB } from "./db";
 import { User, Team, Membership, Bug } from "./models";
 import mongoose from "mongoose";
@@ -59,8 +60,10 @@ async function run() {
     // Create or reuse the team
     let team = await Team.findOne({ key: teamDef.key });
     if (!team) {
-      // First member (always the admin in this list) becomes createdBy
-      const firstUser = await getOrCreateUser(teamDef.members[0]);
+      // First member (always the admin in this list) becomes createdBy.
+      // The "!" below is safe — every team in TEAMS always has 3 members,
+      // TypeScript just can't know that statically.
+      const firstUser = await getOrCreateUser(teamDef.members[0]!);
       team = await Team.create({
         name: teamDef.name,
         key: teamDef.key,
@@ -99,7 +102,7 @@ async function run() {
     });
 
     if (!existingBug) {
-      const admin = await User.findOne({ email: teamDef.members[0].email });
+      const admin = await User.findOne({ email: teamDef.members[0]!.email });
       await Bug.create({
         team: team._id,
         title: teamDef.sampleBug.title,

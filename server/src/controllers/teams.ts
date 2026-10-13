@@ -47,7 +47,7 @@ export const createTeam = asyncHandler(async (req: Request, res: Response) => {
 
 // GET /teams/:teamId/members — list everyone on a team, with their role
 export const getTeamMembers = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId } = req.params;
+  const { teamId } = req.params as { teamId: string };
 
   const memberships = await Membership.find({ team: teamId }).populate(
     "user",
@@ -68,7 +68,7 @@ export const getTeamMembers = asyncHandler(async (req: Request, res: Response) =
 // POST /teams/:teamId/members — adds an existing user to a team by email.
 // Restricted to admins via requireRole("admin") in the route definition.
 export const addMember = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId } = req.params;
+  const { teamId } = req.params as { teamId: string };
   const { email, role } = req.body;
 
   const user = await User.findOne({ email });
@@ -95,7 +95,7 @@ export const addMember = asyncHandler(async (req: Request, res: Response) => {
 // PATCH /teams/:teamId/members/:userId — change a member's role.
 // Restricted to admins via requireRole("admin") in the route definition.
 export const updateMemberRole = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId, userId } = req.params;
+  const { teamId, userId } = req.params as { teamId: string; userId: string };
   const { role } = req.body;
 
   const membership = await Membership.findOne({ team: teamId, user: userId });
@@ -127,7 +127,7 @@ export const updateMemberRole = asyncHandler(async (req: Request, res: Response)
 // DELETE /teams/:teamId/members/:userId — remove a member from a team.
 // Restricted to admins via requireRole("admin") in the route definition.
 export const removeMember = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId, userId } = req.params;
+  const { teamId, userId } = req.params as { teamId: string; userId: string };
 
   const membership = await Membership.findOne({ team: teamId, user: userId });
   if (!membership) {

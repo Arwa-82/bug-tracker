@@ -17,10 +17,11 @@ const commentSchema = new Schema<IComment>(
     timestamps: true,
     // Same transform pattern as the Bug model — converts _id into a
     // plain "id" string and removes _id/__v, so the frontend can
-    // consistently use comment.id instead of comment._id.
+    // consistently use comment.id instead of comment._id. `ret` is typed
+    // as `any` here on purpose — see the note in Activity.ts for why.
     toJSON: {
       virtuals: true,
-      transform: (_doc, ret) => {
+      transform: (_doc, ret: any) => {
         ret.id = ret._id.toString();
         delete ret._id;
         delete ret.__v;

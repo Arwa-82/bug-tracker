@@ -8,7 +8,7 @@ import { Types } from "mongoose";
 // one grouping by severity. Mongoose aggregation is much faster
 // than fetching all bugs and counting them in JavaScript.
 export const getTeamStats = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId } = req.params;
+  const { teamId } = req.params as { teamId: string };
   const teamObjectId = new Types.ObjectId(teamId);
 
   // Count bugs grouped by status, e.g. { open: 4, in_progress: 2, ... }
@@ -57,7 +57,7 @@ export const getTeamStats = asyncHandler(async (req: Request, res: Response) => 
 // (approximated by updatedAt, since we don't track a separate resolvedAt
 // field — good enough for a summary report, not exact to the second).
 export const getSprintReport = asyncHandler(async (req: Request, res: Response) => {
-  const { teamId } = req.params;
+  const { teamId } = req.params as { teamId: string };
   const { startDate, endDate } = req.query;
 
   if (!startDate || !endDate) {

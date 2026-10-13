@@ -98,7 +98,9 @@ const bugSchema = new Schema<IBug>(
     timestamps: true,
     toJSON: {
       virtuals: true,
-      transform: (_doc, ret) => {
+      // `ret` is typed as `any` here on purpose — see the note in
+      // Activity.ts for why.
+      transform: (_doc, ret: any) => {
         ret.id = ret._id.toString();
         delete ret._id;
         delete ret.__v;
