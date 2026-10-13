@@ -44,7 +44,7 @@ export default function Sidebar({ teams }: SidebarProps) {
           <NavLink
             key={team.id}
             to={`/teams/${team.id}/board`}
-            className={({ isActive }) =>
+            className={() =>
               `${linkBase} ${team.id === teamId ? linkActive : linkInactive}`
             }
           >

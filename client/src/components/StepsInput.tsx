@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 interface StepsInputProps {
   steps: string[];
   onChange: (steps: string[]) => void;
