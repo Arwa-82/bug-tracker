@@ -18,6 +18,7 @@ import {
 import type { Bug, BugStatus, BugSeverity, BugPriority } from "../api/bugs";
 import { getTeamMembers } from "../api/teams";
 import type { Member } from "../api/teams";
+import { draftBugFromText } from "../api/ai";
 import StepsInput from "../components/StepsInput";
 import LabelsInput from "../components/LabelsInput";
 
@@ -27,6 +28,7 @@ const COLUMNS: { status: BugStatus; label: string }[] = [
   { status: "fixed", label: "Fixed" },
   { status: "verified", label: "Verified" },
   { status: "closed", label: "Closed" },
+  { status: "reopened", label: "Reopened" },
 ];
 
 const nextStatusOptions: Record<BugStatus, BugStatus[]> = {
@@ -222,6 +224,15 @@ export default function TeamBoardPage() {
   const [showDetails, setShowDetails] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  // AI draft: lets the user paste a rough, messy description and have the
+  // local Ollama model turn it into a structured draft that prefills the
+  // fields above. The user still reviews/edits everything before saving —
+  // this never submits the bug on its own.
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiRawText, setAiRawText] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
   const [bugToDelete, setBugToDelete] = useState<Bug | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -312,6 +323,35 @@ export default function TeamBoardPage() {
       await loadBoard();
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create bug");
+    }
+  }
+
+  // Sends the rough text to the local AI model and, on success, prefills
+  // the create-bug form fields with its suggestion. The user still has to
+  // review and hit "Create" themselves — this only drafts, never submits.
+  async function handleAiDraft(e: React.FormEvent) {
+    e.preventDefault();
+    if (!aiRawText.trim()) return;
+    setAiError(null);
+    setAiLoading(true);
+    try {
+      const draft = await draftBugFromText(aiRawText.trim());
+      setTitle(draft.title);
+      setSeverity(draft.severity);
+      setPriority(draft.priority);
+      setSteps(draft.stepsToReproduce.length ? draft.stepsToReproduce : [""]);
+      setExpectedResult(draft.expectedResult);
+      setActualResult(draft.actualResult);
+      setLabels(draft.labels);
+      setDevice(draft.environment.device);
+      setBrowser(draft.environment.browser);
+      setShowDetails(true);
+      setShowAiModal(false);
+      setAiRawText("");
+    } catch (err) {
+      setAiError(err instanceof Error ? err.message : "AI drafting failed");
+    } finally {
+      setAiLoading(false);
     }
   }
 
@@ -491,6 +531,22 @@ export default function TeamBoardPage() {
           onSubmit={handleCreateBug}
           className="card mb-6 flex-col gap-3 bg-base-100 p-4 shadow"
         >
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-base-content/60">
+              Bug details
+            </label>
+            <button
+              type="button"
+              onClick={() => {
+                setAiError(null);
+                setShowAiModal(true);
+              }}
+              className="btn btn-outline btn-primary btn-xs gap-1"
+            >
+              ✨ Draft with AI
+            </button>
+          </div>
+
           <input
             type="text"
             placeholder="Bug title"
@@ -607,7 +663,7 @@ export default function TeamBoardPage() {
       )}
 
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-6">
           {COLUMNS.map((col) => {
             const bugsInColumn = filteredBugs.filter(
               (b) => b.status === col.status
@@ -636,6 +692,71 @@ export default function TeamBoardPage() {
           })}
         </div>
       </DndContext>
+
+      {/* AI draft modal: lets the user paste a rough description and have
+          the local model turn it into a structured draft. Submitting here
+          only prefills the create-bug form above — it never saves a bug. */}
+      {showAiModal && (
+        <div className="modal modal-open">
+          <div className="modal-box">
+            <h3 className="text-lg font-semibold">✨ Draft bug with AI</h3>
+            <p className="py-2 text-sm text-base-content/70">
+              Paste a rough, messy description of the bug — the AI will turn
+              it into a structured report (title, steps, expected/actual
+              result, severity, labels) for you to review and edit before
+              creating it.
+            </p>
+
+            <form onSubmit={handleAiDraft}>
+              <textarea
+                className="textarea textarea-bordered w-full"
+                rows={5}
+                placeholder="e.g. when i click login on safari after changing password it just spins forever and never logs in"
+                value={aiRawText}
+                onChange={(e) => setAiRawText(e.target.value)}
+                disabled={aiLoading}
+                autoFocus
+              />
+
+              {aiError && (
+                <p className="mt-2 text-sm text-error">{aiError}</p>
+              )}
+
+              <div className="modal-action">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setShowAiModal(false);
+                    setAiError(null);
+                  }}
+                  disabled={aiLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={aiLoading || !aiRawText.trim()}
+                >
+                  {aiLoading ? (
+                    <>
+                      <span className="loading loading-spinner loading-xs" />
+                      Drafting...
+                    </>
+                  ) : (
+                    "Draft"
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+          <div
+            className="modal-backdrop"
+            onClick={() => !aiLoading && setShowAiModal(false)}
+          />
+        </div>
+      )}
 
       {bugToDelete && (
         <div className="modal modal-open">
