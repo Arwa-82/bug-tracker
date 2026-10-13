@@ -4,7 +4,7 @@ import { logActivity } from "../services/activityService";
 import { asyncHandler } from "../middleware/errorHandler";
 
 export const getBugComments = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = req.params as { id: string };
 
   const comments = await Comment.find({ bug: id })
     .populate("author", "name email")
@@ -14,7 +14,7 @@ export const getBugComments = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const addBugComment = asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
+  const { id } = req.params as { id: string };
   const userId = (req as any).user._id;
   const { text } = req.body;
 
@@ -33,7 +33,7 @@ export const addBugComment = asyncHandler(async (req: Request, res: Response) =>
 
 export const deleteComment = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req as any).user._id;
-  const { commentId } = req.params;
+  const { commentId } = req.params as { commentId: string };
 
   const comment = await Comment.findById(commentId);
   if (!comment) {

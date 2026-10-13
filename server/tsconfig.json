@@ -22,7 +22,12 @@
 
     // Stricter Typechecking Options
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true,
+    // exactOptionalPropertyTypes was removed: it was forcing every optional
+    // property (including ones coming from Mongoose's own query types) to
+    // distinguish "missing" from "explicitly undefined", which doesn't match
+    // how plain JS objects normally behave and was the root cause of most of
+    // our tsc errors across the controllers. Standard "strict": true below
+    // already covers the useful parts of strict null checking.
 
     // Style Options
     // "noImplicitReturns": true,

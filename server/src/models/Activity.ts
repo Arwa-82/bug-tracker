@@ -40,7 +40,11 @@ const activitySchema = new Schema<IActivity>(
     timestamps: true,
     toJSON: {
       virtuals: true,
-      transform: (_doc, ret) => {
+      // `ret` is typed as `any` here on purpose — Mongoose's generated type
+      // for this callback doesn't know about the `.id` we're adding or
+      // allow deleting `_id`/`__v`, even though that's the whole point of
+      // this transform. This is a known rough edge in Mongoose's types.
+      transform: (_doc, ret: any) => {
         ret.id = ret._id.toString();
         delete ret._id;
         delete ret.__v;
